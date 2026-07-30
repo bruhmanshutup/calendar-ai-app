@@ -1,0 +1,1569 @@
+"use client";
+
+import Link from "next/link";
+import {
+  AlertTriangle,
+  ArrowRight,
+  BarChart3,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  CircleHelp,
+  Clock3,
+  Cloud,
+  FileText,
+  History,
+  Home,
+  Info,
+  LayoutList,
+  Lock,
+  LockOpen,
+  Menu,
+  Moon,
+  MoreHorizontal,
+  MoveRight,
+  PanelLeft,
+  PencilLine,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Sun,
+  Target,
+  Trash2,
+  Upload,
+  UserRound,
+  Waypoints,
+  X,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type ReactNode,
+} from "react";
+import type {
+  ExtractedTask,
+  PlannedSession,
+  PlanningMode,
+  ScheduleReasonCode,
+  UnschedulableTask,
+} from "@/lib/domain/types";
+import { usePlanPilot } from "./planpilot-provider";
+
+export type PlanPilotView =
+  | "landing"
+  | "login"
+  | "onboarding"
+  | "dashboard"
+  | "import"
+  | "review"
+  | "schedule"
+  | "daily-review"
+  | "changes"
+  | "settings";
+
+const APP_NAV: Array<{
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  view: PlanPilotView;
+}> = [
+  { href: "/dashboard", label: "Overview", icon: Home, view: "dashboard" },
+  { href: "/import", label: "Add responsibilities", icon: Plus, view: "import" },
+  { href: "/tasks/review", label: "Tasks", icon: LayoutList, view: "review" },
+  { href: "/schedule", label: "Schedule", icon: CalendarDays, view: "schedule" },
+  {
+    href: "/daily-review",
+    label: "Daily review",
+    icon: CheckCircle2,
+    view: "daily-review",
+  },
+  { href: "/changes", label: "Changes", icon: History, view: "changes" },
+];
+
+const REASON_LABELS: Record<ScheduleReasonCode, string> = {
+  DEADLINE_RISK: "Deadline risk",
+  PREFERRED_FOCUS_WINDOW: "Focus window",
+  PREFERRED_ROUTINE_WINDOW: "Routine window",
+  PRIORITY: "High priority",
+  EARLY_COMPLETION: "Early completion",
+  SPLIT_TO_REDUCE_FATIGUE: "Reduced fatigue",
+  RECURRING_SPACING: "Healthy spacing",
+  BUFFER_PRESERVED: "Buffer preserved",
+  LOW_ENERGY_FIT: "Energy fit",
+  FINAL_VALID_OPENING: "Final opening",
+  STABILITY_PRESERVED: "Kept stable",
+  MOVED_AFTER_MISSED: "Missed recovery",
+  FIXED_TIME: "Fixed time",
+};
+
+function formatTime(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatDay(value: string, long = false): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: long ? "long" : "short",
+    month: long ? "long" : "short",
+    day: "numeric",
+  }).format(new Date(value));
+}
+
+function shortDate(value?: string): string {
+  if (!value) return "Not specified";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(`${value}T12:00:00Z`));
+}
+
+function Brand({ compact = false }: { compact?: boolean }) {
+  return (
+    <Link className="brand" href="/">
+      <span className="brand-mark" aria-hidden="true">
+        <Waypoints size={compact ? 18 : 20} strokeWidth={2.3} />
+      </span>
+      <span className="brand-name">PlanPilot</span>
+    </Link>
+  );
+}
+
+function Button({
+  children,
+  variant = "primary",
+  size = "md",
+  className = "",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "primary" | "secondary" | "ghost" | "danger";
+  size?: "sm" | "md" | "lg";
+}) {
+  return (
+    <button
+      className={`button button-${variant} button-${size} ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Badge({
+  children,
+  tone = "neutral",
+}: {
+  children: ReactNode;
+  tone?: "neutral" | "success" | "warning" | "danger" | "info";
+}) {
+  return <span className={`badge badge-${tone}`}>{children}</span>;
+}
+
+export function FieldConfidenceIndicator({
+  label,
+  confidence,
+}: {
+  label: string;
+  confidence?: number;
+}) {
+  if (confidence === undefined) return null;
+  const tone =
+    confidence >= 0.85 ? "high" : confidence >= 0.65 ? "medium" : "low";
+  return (
+    <span
+      className={`confidence confidence-${tone}`}
+      title={`${Math.round(confidence * 100)}% field confidence`}
+    >
+      <span aria-hidden="true" />
+      {label}
+      {tone === "low" ? " · check" : ""}
+    </span>
+  );
+}
+
+export function ScheduleReason({
+  reasons,
+  explanation,
+}: {
+  reasons: ScheduleReasonCode[];
+  explanation: string;
+}) {
+  return (
+    <div className="reason-block">
+      <div className="reason-tags">
+        {reasons.slice(0, 3).map((reason) => (
+          <span key={reason}>
+            <Sparkles size={12} aria-hidden="true" />
+            {REASON_LABELS[reason]}
+          </span>
+        ))}
+      </div>
+      <p>{explanation}</p>
+    </div>
+  );
+}
+
+export function PlanHealthPanel({ compact = false }: { compact?: boolean }) {
+  const { proposal } = usePlanPilot();
+  const health = proposal.planHealth;
+  return (
+    <section className={`plan-health ${compact ? "plan-health-compact" : ""}`}>
+      <div className="plan-health-heading">
+        <div>
+          <span className="eyebrow">
+            <ShieldCheck size={15} aria-hidden="true" />
+            Plan health
+          </span>
+          <h2>{health.scheduledPercent}% of estimated work fits</h2>
+          <p>{health.summary}</p>
+        </div>
+        <div
+          className="health-ring"
+          style={
+            {
+              "--health-progress": `${health.scheduledPercent * 3.6}deg`,
+            } as React.CSSProperties
+          }
+          aria-label={`${health.scheduledPercent}% scheduled`}
+        >
+          <strong>{health.scheduledPercent}%</strong>
+          <span>scheduled</span>
+        </div>
+      </div>
+      <div className="health-metrics">
+        <div>
+          <span className="metric-icon metric-icon-green">
+            <Clock3 size={16} />
+          </span>
+          <p>Buffer retained</p>
+          <strong>{Math.round(health.bufferMinutesRetained / 60)}h {health.bufferMinutesRetained % 60}m</strong>
+        </div>
+        <div>
+          <span className="metric-icon metric-icon-amber">
+            <AlertTriangle size={16} />
+          </span>
+          <p>Deadlines at risk</p>
+          <strong>{health.deadlinesAtRisk}</strong>
+        </div>
+        <div>
+          <span className="metric-icon metric-icon-blue">
+            <Zap size={16} />
+          </span>
+          <p>Demanding blocks</p>
+          <strong>{health.demandingFocusBlocks}</strong>
+        </div>
+        <div>
+          <span className="metric-icon metric-icon-purple">
+            <Target size={16} />
+          </span>
+          <p>Recurring on track</p>
+          <strong>
+            {health.recurringGoalsOnTrack}/{health.recurringGoalsOnTrack + health.recurringGoalsBehind}
+          </strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function EmptyState({
+  icon: Icon = FileText,
+  title,
+  detail,
+  action,
+}: {
+  icon?: LucideIcon;
+  title: string;
+  detail: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="empty-state">
+      <span><Icon size={22} /></span>
+      <h3>{title}</h3>
+      <p>{detail}</p>
+      {action}
+    </div>
+  );
+}
+
+export function ErrorState({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="state-card state-error" role="alert">
+      <AlertTriangle size={20} />
+      <div>
+        <strong>We couldn’t finish the interpretation</strong>
+        <p>{message}</p>
+      </div>
+      <Button variant="secondary" size="sm" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
+export function LoadingState() {
+  return (
+    <div className="state-card" aria-live="polite">
+      <RefreshCw className="spin" size={19} />
+      <div>
+        <strong>Separating tasks from context…</strong>
+        <p>Your pasted text stays visible while PlanPilot checks uncertainty.</p>
+      </div>
+    </div>
+  );
+}
+
+function Toast() {
+  const { toast, clearToast } = usePlanPilot();
+  if (!toast) return null;
+  return (
+    <div className="toast" role="status">
+      <CheckCircle2 size={18} />
+      <span>{toast}</span>
+      <button onClick={clearToast} aria-label="Dismiss message">
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
+
+function AppShell({
+  view,
+  children,
+}: {
+  view: PlanPilotView;
+  children: ReactNode;
+}) {
+  const { theme, toggleTheme } = usePlanPilot();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  return (
+    <div className="app-shell">
+      <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
+        <div className="sidebar-top">
+          <Brand compact />
+          <button
+            className="mobile-close"
+            aria-label="Close navigation"
+            onClick={() => setMobileOpen(false)}
+          >
+            <X size={19} />
+          </button>
+        </div>
+        <nav aria-label="Main navigation">
+          {APP_NAV.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                href={item.href}
+                key={item.href}
+                className={item.view === view ? "active" : ""}
+              >
+                <Icon size={18} />
+                <span>{item.label}</span>
+                {item.view === "daily-review" && <i>1</i>}
+              </Link>
+            );
+          })}
+        </nav>
+        <div className="sidebar-spacer" />
+        <nav aria-label="Secondary navigation">
+          <Link
+            href="/settings"
+            className={view === "settings" ? "active" : ""}
+          >
+            <Settings size={18} />
+            <span>Settings</span>
+          </Link>
+          <button onClick={toggleTheme} className="sidebar-action">
+            {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
+            <span>{theme === "light" ? "Dark mode" : "Light mode"}</span>
+          </button>
+          <button className="sidebar-action">
+            <CircleHelp size={18} />
+            <span>Help & feedback</span>
+          </button>
+        </nav>
+        <div className="profile-chip">
+          <span>AM</span>
+          <div>
+            <strong>Alex Morgan</strong>
+            <small>Demo workspace</small>
+          </div>
+          <MoreHorizontal size={17} />
+        </div>
+      </aside>
+      <main className="app-main">
+        <header className="app-topbar">
+          <button
+            className="mobile-menu"
+            aria-label="Open navigation"
+            onClick={() => setMobileOpen(true)}
+          >
+            <Menu size={21} />
+          </button>
+          <div className="topbar-context">
+            <span className="sync-dot" />
+            Mock providers active
+          </div>
+          <div className="topbar-right">
+            <span>Thu, Jul 30</span>
+            <Link href="/import" className="topbar-add">
+              <Plus size={17} />
+              Add
+            </Link>
+          </div>
+        </header>
+        <div className="app-content">{children}</div>
+      </main>
+      <Toast />
+    </div>
+  );
+}
+
+function LandingView() {
+  return (
+    <div className="landing">
+      <header className="landing-nav">
+        <Brand />
+        <nav aria-label="Landing navigation">
+          <a href="#how-it-works">How it works</a>
+          <a href="#trust">Why PlanPilot</a>
+        </nav>
+        <div>
+          <Link href="/login" className="text-link">Sign in</Link>
+          <Link href="/onboarding" className="button button-primary button-md">
+            Try the demo
+            <ArrowRight size={16} />
+          </Link>
+        </div>
+      </header>
+      <main>
+        <section className="hero">
+          <div className="hero-copy">
+            <Badge tone="info">
+              <Sparkles size={13} />
+              Planning that explains itself
+            </Badge>
+            <h1>
+              Turn messy responsibilities into a plan you can <em>trust.</em>
+            </h1>
+            <p>
+              Paste an assignment sheet, checklist, or chaotic block of text.
+              PlanPilot finds the work, flags uncertainty, and builds a realistic
+              schedule around your actual time.
+            </p>
+            <div className="hero-actions">
+              <Link href="/onboarding" className="button button-primary button-lg">
+                Build my plan
+                <ArrowRight size={17} />
+              </Link>
+              <Link href="/dashboard" className="button button-secondary button-lg">
+                Explore the demo
+              </Link>
+            </div>
+            <div className="trust-row">
+              <span><Check size={14} /> No invented deadlines</span>
+              <span><Check size={14} /> Nothing exported before approval</span>
+              <span><Check size={14} /> Replans preserve your week</span>
+            </div>
+          </div>
+          <div className="hero-product" aria-label="PlanPilot product preview">
+            <div className="preview-window">
+              <div className="preview-chrome">
+                <div><i /><i /><i /></div>
+                <span>Thursday · Your proposed plan</span>
+                <Badge tone="success">Realistic</Badge>
+              </div>
+              <div className="preview-body">
+                <div className="preview-health">
+                  <div className="mini-ring"><strong>86%</strong></div>
+                  <div>
+                    <span>PLAN HEALTH</span>
+                    <h3>Most work fits comfortably.</h3>
+                    <p>Chemistry review has only 20 minutes of buffer.</p>
+                  </div>
+                </div>
+                <div className="preview-grid">
+                  <div className="preview-timeline">
+                    <span className="preview-now">4 PM</span>
+                    <article className="preview-session session-blue">
+                      <small>4:15–5:00 PM</small>
+                      <strong>Chemistry review</strong>
+                      <p><Sparkles size={12} /> Preferred focus window</p>
+                    </article>
+                    <span className="preview-now">5 PM</span>
+                    <article className="preview-session session-green">
+                      <small>5:30–6:15 PM</small>
+                      <strong>Gym session</strong>
+                      <p><Target size={12} /> Spaced from Tuesday</p>
+                    </article>
+                    <span className="preview-now">6 PM</span>
+                  </div>
+                  <div className="preview-risk">
+                    <span><AlertTriangle size={15} /> Needs attention</span>
+                    <strong>30 min won’t fit</strong>
+                    <p>Keep Saturday morning open or shorten the essay estimate.</p>
+                    <button>See options <ChevronRight size={14} /></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="floating-note floating-note-one">
+              <span><ShieldCheck size={16} /></span>
+              <div><strong>Uncertainty preserved</strong><small>“Soon” stays unscheduled</small></div>
+            </div>
+            <div className="floating-note floating-note-two">
+              <span><RefreshCw size={16} /></span>
+              <div><strong>One change, not a reset</strong><small>Missed work moved to Wed</small></div>
+            </div>
+          </div>
+        </section>
+        <section className="principles" id="how-it-works">
+          <div className="section-intro">
+            <span className="eyebrow">FROM SOURCE TO SCHEDULE</span>
+            <h2>A calmer way to answer “what do I do next?”</h2>
+            <p>AI interprets the language. Transparent rules build the calendar.</p>
+          </div>
+          <div className="principle-grid">
+            <article>
+              <span>01</span>
+              <div className="principle-icon"><FileText size={22} /></div>
+              <h3>Bring the mess</h3>
+              <p>Paste text or upload a TXT file. Tasks and context are separated without hiding the source.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <div className="principle-icon"><ShieldCheck size={22} /></div>
+              <h3>Review what’s uncertain</h3>
+              <p>Low-confidence dates, times, and effort estimates are highlighted field by field.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <div className="principle-icon"><Waypoints size={22} /></div>
+              <h3>Approve a realistic plan</h3>
+              <p>Every block has a reason, buffer is protected, and overload is shown plainly.</p>
+            </article>
+          </div>
+        </section>
+        <section className="trust-section" id="trust">
+          <div>
+            <span className="eyebrow">CONTROL STAYS WITH YOU</span>
+            <h2>A planning layer, not another calendar clone.</h2>
+          </div>
+          <div className="trust-points">
+            <p><CheckCircle2 /> Fixed events and deadlines are never confused.</p>
+            <p><CheckCircle2 /> Missed sessions trigger a minimal change proposal.</p>
+            <p><CheckCircle2 /> Calendar writes happen only after explicit approval.</p>
+          </div>
+        </section>
+      </main>
+      <footer className="landing-footer">
+        <Brand compact />
+        <p>Plan with reality, not wishful thinking.</p>
+        <span>© 2026 PlanPilot</span>
+      </footer>
+    </div>
+  );
+}
+
+function LoginView() {
+  const [email, setEmail] = useState("");
+  return (
+    <div className="auth-page">
+      <div className="auth-brand"><Brand /></div>
+      <section className="auth-card">
+        <span className="auth-icon"><UserRound size={23} /></span>
+        <h1>Welcome back</h1>
+        <p>Sign in to review your plan and today’s work.</p>
+        <label>
+          Email address
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
+          />
+        </label>
+        <label>
+          Password
+          <input type="password" placeholder="••••••••••••" />
+        </label>
+        <Link className="button button-primary button-lg auth-submit" href="/dashboard">
+          Sign in
+          <ArrowRight size={16} />
+        </Link>
+        <div className="auth-divider"><span>or</span></div>
+        <Link className="button button-secondary button-md auth-submit" href="/dashboard">
+          Continue in demo mode
+        </Link>
+        <small>
+          Supabase authentication activates when project credentials are configured.
+          Demo mode uses no production account.
+        </small>
+      </section>
+    </div>
+  );
+}
+
+function OnboardingView() {
+  const [step, setStep] = useState(1);
+  const [weekends, setWeekends] = useState(true);
+  const [mode, setMode] = useState<PlanningMode>("balanced");
+  return (
+    <div className="onboarding-page">
+      <header><Brand /><span>Set up your planning rules</span></header>
+      <main>
+        <div className="stepper" aria-label={`Step ${step} of 3`}>
+          {[1, 2, 3].map((item) => (
+            <span key={item} className={item <= step ? "active" : ""}>
+              {item < step ? <Check size={13} /> : item}
+            </span>
+          ))}
+          <i /><i />
+        </div>
+        {step === 1 && (
+          <section className="onboarding-card">
+            <span className="eyebrow">STEP 1 OF 3</span>
+            <h1>Start with your real day</h1>
+            <p>These boundaries are hard constraints. PlanPilot will not schedule through them.</p>
+            <div className="form-grid">
+              <label>Name<input defaultValue="Alex Morgan" /></label>
+              <label>
+                IANA time zone
+                <select defaultValue="America/Los_Angeles">
+                  <option>America/Los_Angeles</option>
+                  <option>America/New_York</option>
+                  <option>Europe/London</option>
+                  <option>Asia/Tokyo</option>
+                </select>
+              </label>
+              <label>Usually awake at<input type="time" defaultValue="07:00" /></label>
+              <label>Usually asleep at<input type="time" defaultValue="23:00" /></label>
+            </div>
+            <div className="onboarding-actions">
+              <span>Saved later to your Supabase profile</span>
+              <Button size="lg" onClick={() => setStep(2)}>Continue <ArrowRight size={16} /></Button>
+            </div>
+          </section>
+        )}
+        {step === 2 && (
+          <section className="onboarding-card">
+            <span className="eyebrow">STEP 2 OF 3</span>
+            <h1>When can work realistically happen?</h1>
+            <p>Recurring availability becomes a boundary, not a suggestion.</p>
+            <div className="availability-table">
+              {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((day) => (
+                <div key={day}>
+                  <label><input type="checkbox" defaultChecked /> {day}</label>
+                  <input type="time" defaultValue="16:00" aria-label={`${day} start`} />
+                  <span>to</span>
+                  <input type="time" defaultValue="21:00" aria-label={`${day} end`} />
+                </div>
+              ))}
+            </div>
+            <label className="switch-row">
+              <span><strong>Use weekends when needed</strong><small>Still preserve planning-mode buffer.</small></span>
+              <input type="checkbox" checked={weekends} onChange={(event) => setWeekends(event.target.checked)} />
+            </label>
+            <div className="onboarding-actions">
+              <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
+              <Button size="lg" onClick={() => setStep(3)}>Continue <ArrowRight size={16} /></Button>
+            </div>
+          </section>
+        )}
+        {step === 3 && (
+          <section className="onboarding-card">
+            <span className="eyebrow">STEP 3 OF 3</span>
+            <h1>Choose how much breathing room to keep</h1>
+            <p>Every mode has explicit scheduling behavior. Hard constraints never change.</p>
+            <div className="mode-cards">
+              {([
+                ["conservative", "25% buffer", "Up to 2 demanding blocks a day. Finish earlier."],
+                ["balanced", "15% buffer", "Up to 3 demanding blocks. Balance margin and flexibility."],
+                ["aggressive", "5% buffer", "Denser plans, while still protecting hard constraints."],
+              ] as const).map(([value, label, detail]) => (
+                <button
+                  key={value}
+                  className={mode === value ? "selected" : ""}
+                  onClick={() => setMode(value)}
+                >
+                  <span>{mode === value ? <Check size={14} /> : null}</span>
+                  <strong>{value[0].toUpperCase() + value.slice(1)}</strong>
+                  <b>{label}</b>
+                  <p>{detail}</p>
+                </button>
+              ))}
+            </div>
+            <div className="onboarding-actions">
+              <Button variant="ghost" onClick={() => setStep(2)}>Back</Button>
+              <Link className="button button-primary button-lg" href="/dashboard">
+                Finish setup <ArrowRight size={16} />
+              </Link>
+            </div>
+          </section>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function PageHeading({
+  eyebrow,
+  title,
+  detail,
+  actions,
+}: {
+  eyebrow?: string;
+  title: string;
+  detail: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="page-heading">
+      <div>
+        {eyebrow && <span className="eyebrow">{eyebrow}</span>}
+        <h1>{title}</h1>
+        <p>{detail}</p>
+      </div>
+      {actions && <div className="page-actions">{actions}</div>}
+    </div>
+  );
+}
+
+function DashboardView() {
+  const { proposal, tasks, history } = usePlanPilot();
+  const todaySessions = proposal.sessions.filter((session) =>
+    session.start.startsWith("2026-07-30") || formatDay(session.start).includes("Jul 30"),
+  );
+  const shownSessions = todaySessions.length > 0 ? todaySessions : proposal.sessions.slice(0, 3);
+  return (
+    <>
+      <PageHeading
+        eyebrow="THURSDAY, JULY 30"
+        title="Good morning, Alex."
+        detail="Your plan is mostly on track. One workload risk needs a decision."
+        actions={
+          <Link href="/import" className="button button-primary button-md">
+            <Plus size={16} /> Add responsibilities
+          </Link>
+        }
+      />
+      <div className="dashboard-grid">
+        <div className="dashboard-main">
+          <PlanHealthPanel />
+          <section className="panel">
+            <div className="panel-heading">
+              <div>
+                <h2>Today’s plan</h2>
+                <p>{shownSessions.reduce((sum, session) => sum + session.minutes, 0)} focused minutes across {shownSessions.length} sessions</p>
+              </div>
+              <Link href="/schedule">View week <ArrowRight size={15} /></Link>
+            </div>
+            <div className="today-list">
+              {shownSessions.map((session, index) => (
+                <article key={session.id} className="today-item">
+                  <div className="today-time">
+                    <strong>{formatTime(session.start)}</strong>
+                    <span>{formatTime(session.end)}</span>
+                  </div>
+                  <i className={index === 0 ? "blue" : index === 1 ? "green" : "amber"} />
+                  <div className="today-detail">
+                    <div>
+                      <strong>{session.title}</strong>
+                      <Badge tone={session.status === "approved" ? "success" : "neutral"}>
+                        {session.status}
+                      </Badge>
+                    </div>
+                    <p>{session.explanation}</p>
+                  </div>
+                  <button aria-label={`Open ${session.title}`}><ChevronRight size={18} /></button>
+                </article>
+              ))}
+            </div>
+          </section>
+          <section className="panel">
+            <div className="panel-heading">
+              <div><h2>Upcoming deadlines</h2><p>Dates stay date-only when no time was stated.</p></div>
+              <Link href="/tasks/review">All tasks <ArrowRight size={15} /></Link>
+            </div>
+            <div className="deadline-list">
+              {tasks.filter((task) => task.dueDate).slice(0, 3).map((task) => (
+                <article key={task.id}>
+                  <div className="date-tile">
+                    <span>{shortDate(task.dueDate).split(" ")[0]}</span>
+                    <strong>{shortDate(task.dueDate).split(" ")[1]}</strong>
+                  </div>
+                  <div><strong>{task.title}</strong><p>{task.estimatedMinutes} min estimated · {task.category}</p></div>
+                  <Badge tone={task.priority === "urgent" ? "danger" : "neutral"}>{task.priority}</Badge>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+        <aside className="dashboard-side">
+          <section className="risk-panel">
+            <span className="risk-icon"><AlertTriangle size={20} /></span>
+            <Badge tone="warning">Needs a decision</Badge>
+            <h2>{proposal.planHealth.unscheduledMinutes} minutes do not fit yet</h2>
+            <p>{proposal.unschedulable[0]?.explanation ?? "An uncertain task is waiting for review."}</p>
+            <div className="risk-option">
+              <span>Best option</span>
+              <strong>Open Saturday after 1 PM</strong>
+              <small>Adds enough capacity while keeping 15% buffer.</small>
+            </div>
+            <Link href="/schedule" className="button button-secondary button-md">
+              Review options <ArrowRight size={15} />
+            </Link>
+          </section>
+          <section className="panel side-panel">
+            <div className="panel-heading">
+              <div><h2>Recent changes</h2><p>Meaningful updates only</p></div>
+            </div>
+            <div className="mini-history">
+              {history.slice(0, 3).map((item) => (
+                <article key={item.id}>
+                  <span><PencilLine size={15} /></span>
+                  <div><strong>{item.title}</strong><p>{item.at}</p></div>
+                </article>
+              ))}
+            </div>
+            <Link href="/changes" className="full-link">View change history <ArrowRight size={14} /></Link>
+          </section>
+          <section className="completion-card">
+            <span><CheckCircle2 size={20} /></span>
+            <div><strong>135 min completed this week</strong><p>One gym session and two study blocks.</p></div>
+          </section>
+        </aside>
+      </div>
+    </>
+  );
+}
+
+function ImportView() {
+  const {
+    importText,
+    setImportText,
+    importState,
+    importError,
+    analyzeText,
+    tasks,
+  } = usePlanPilot();
+  const [tab, setTab] = useState<"paste" | "txt">("paste");
+  const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.name.toLocaleLowerCase().endsWith(".txt")) {
+      setImportText("");
+      return;
+    }
+    setImportText(await file.text());
+  };
+  return (
+    <>
+      <PageHeading
+        eyebrow="ADD RESPONSIBILITIES"
+        title="Bring the mess. We’ll find the work."
+        detail="PlanPilot separates actionable tasks from background information and preserves anything uncertain for review."
+      />
+      <div className="import-layout">
+        <section className="panel import-panel">
+          <div className="tab-list" role="tablist">
+            <button className={tab === "paste" ? "active" : ""} onClick={() => setTab("paste")} role="tab">
+              <FileText size={16} /> Paste text
+            </button>
+            <button className={tab === "txt" ? "active" : ""} onClick={() => setTab("txt")} role="tab">
+              <Upload size={16} /> TXT file
+            </button>
+          </div>
+          {tab === "paste" ? (
+            <label className="textarea-label">
+              Source text
+              <textarea
+                value={importText}
+                onChange={(event) => setImportText(event.target.value)}
+                placeholder="Paste an assignment sheet, email, or checklist…"
+              />
+              <span>{importText.length.toLocaleString()} characters · Your text remains editable if extraction fails.</span>
+            </label>
+          ) : (
+            <label className="file-drop">
+              <Upload size={25} />
+              <strong>Choose a TXT file</strong>
+              <span>Plain text only · up to 100 KB</span>
+              <input type="file" accept=".txt,text/plain" onChange={handleFile} />
+            </label>
+          )}
+          <div className="future-formats">
+            <span>More formats</span>
+            <button disabled title="PDF extraction is a future capability"><FileText size={15} /> PDF <Badge>Coming later</Badge></button>
+            <button disabled title="Image OCR is a future capability"><Upload size={15} /> Image or screenshot <Badge>Coming later</Badge></button>
+          </div>
+          <div className="import-actions">
+            <p><ShieldCheck size={16} /> Dates and times are never guessed when absent.</p>
+            <Button size="lg" onClick={analyzeText} disabled={!importText.trim() || importState === "loading"}>
+              {importState === "loading" ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />}
+              Interpret responsibilities
+            </Button>
+          </div>
+        </section>
+        <aside className="import-side">
+          <section className="tip-card">
+            <span><Info size={17} /></span>
+            <div>
+              <strong>Good input can still be messy</strong>
+              <p>Include deadlines, rough effort, recurring counts, and fixed appointments when you know them. It is fine to leave things out.</p>
+            </div>
+          </section>
+          <section className="panel example-card">
+            <span className="eyebrow">EXAMPLE</span>
+            <p>“Finish the essay soon. Doctor appointment Tuesday at 3 PM. Gym four times this week.”</p>
+            <div>
+              <span><AlertTriangle size={14} /> Essay stays without a deadline</span>
+              <span><CalendarDays size={14} /> Appointment becomes a fixed event</span>
+              <span><Target size={14} /> Gym becomes a four-session quota</span>
+            </div>
+          </section>
+        </aside>
+      </div>
+      <div className="import-state">
+        {importState === "loading" && <LoadingState />}
+        {importState === "error" && importError && <ErrorState message={importError} onRetry={analyzeText} />}
+        {importState === "success" && (
+          <div className="state-card state-success">
+            <CheckCircle2 size={20} />
+            <div>
+              <strong>{tasks.length} responsibilities found</strong>
+              <p>{tasks.filter((task) => task.reviewRequired).length} need a quick review before scheduling.</p>
+            </div>
+            <Link className="button button-primary button-sm" href="/tasks/review">Review tasks <ArrowRight size={14} /></Link>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+export function TaskReviewCard({ task }: { task: ExtractedTask }) {
+  const { updateTask, approveTask, deleteTask } = usePlanPilot();
+  const [expanded, setExpanded] = useState(task.reviewRequired ?? false);
+  return (
+    <article className={`task-review-card ${task.reviewRequired ? "needs-review" : ""}`}>
+      <div className="task-card-top">
+        <div className="task-check">
+          {task.approved ? <Check size={15} /> : <AlertTriangle size={15} />}
+        </div>
+        <div className="task-title-wrap">
+          <div className="task-status-line">
+            <Badge tone={task.reviewRequired ? "warning" : "success"}>
+              {task.reviewRequired ? "Review needed" : "Ready to schedule"}
+            </Badge>
+            <Badge>{task.taskType.replace("_", " ")}</Badge>
+          </div>
+          <input
+            className="task-title-input"
+            value={task.title}
+            aria-label="Task title"
+            onChange={(event) => updateTask(task.id ?? "", { title: event.target.value })}
+          />
+          <FieldConfidenceIndicator label="Title" confidence={task.fieldConfidence.title} />
+        </div>
+        <button className="icon-button" onClick={() => setExpanded(!expanded)} aria-label={expanded ? "Collapse task" : "Edit task"}>
+          <PencilLine size={17} />
+        </button>
+        <button className="icon-button" onClick={() => deleteTask(task.id ?? "")} aria-label={`Delete ${task.title}`}>
+          <Trash2 size={17} />
+        </button>
+      </div>
+      <div className="source-quote">
+        <span>From your source</span>
+        <p>“{task.sourceText}”</p>
+      </div>
+      <div className="task-field-summary">
+        <div>
+          <span>Deadline</span>
+          <strong>{task.dueDate ? `${shortDate(task.dueDate)}${task.dueTime ? ` at ${task.dueTime}` : " · time not specified"}` : "Not specified"}</strong>
+          <FieldConfidenceIndicator label="Deadline" confidence={task.fieldConfidence.dueDate} />
+        </div>
+        <div>
+          <span>Effort</span>
+          <strong>{task.estimatedMinutes ? `${task.estimatedMinutes} minutes` : "Not estimated"}</strong>
+          <FieldConfidenceIndicator label="Effort" confidence={task.fieldConfidence.estimatedMinutes} />
+        </div>
+        <div>
+          <span>Priority</span>
+          <strong className="capitalize">{task.priority}</strong>
+          <FieldConfidenceIndicator label="Priority" confidence={task.fieldConfidence.priority} />
+        </div>
+        <div>
+          <span>Energy</span>
+          <strong className="capitalize">{task.energyDemand}</strong>
+        </div>
+      </div>
+      {task.dueDate && !task.dueTime && (
+        <div className="assumption-note">
+          <Info size={15} />
+          <span><strong>Planning assumption only:</strong> feasibility uses the end of your waking day. No due time will be saved.</span>
+        </div>
+      )}
+      {task.missingInformation.length > 0 && (
+        <div className="missing-row">
+          {task.missingInformation.map((item) => <Badge tone="warning" key={item}>{item}</Badge>)}
+        </div>
+      )}
+      {expanded && (
+        <div className="task-edit-grid">
+          <label>
+            Task type
+            <select value={task.taskType} onChange={(event) => updateTask(task.id ?? "", { taskType: event.target.value as ExtractedTask["taskType"] })}>
+              <option value="flexible">Flexible work</option>
+              <option value="fixed_time">Fixed-time event</option>
+              <option value="recurring_goal">Recurring quota</option>
+            </select>
+          </label>
+          <label>
+            Due date
+            <input type="date" value={task.dueDate ?? ""} onChange={(event) => updateTask(task.id ?? "", { dueDate: event.target.value || undefined })} />
+          </label>
+          <label>
+            Due time
+            <input type="time" value={task.dueTime ?? ""} onChange={(event) => updateTask(task.id ?? "", { dueTime: event.target.value || undefined })} />
+          </label>
+          <label>
+            Estimated minutes
+            <input type="number" min={1} max={1440} value={task.estimatedMinutes ?? ""} onChange={(event) => updateTask(task.id ?? "", { estimatedMinutes: Number(event.target.value) || undefined })} />
+          </label>
+          <label>
+            Priority
+            <select value={task.priority} onChange={(event) => updateTask(task.id ?? "", { priority: event.target.value as ExtractedTask["priority"] })}>
+              <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option>
+            </select>
+          </label>
+          <label>
+            Category
+            <select value={task.category} onChange={(event) => updateTask(task.id ?? "", { category: event.target.value as ExtractedTask["category"] })}>
+              {["school", "work", "health", "fitness", "errand", "personal", "other"].map((value) => <option key={value}>{value}</option>)}
+            </select>
+          </label>
+          <label>
+            Energy demand
+            <select value={task.energyDemand} onChange={(event) => updateTask(task.id ?? "", { energyDemand: event.target.value as ExtractedTask["energyDemand"] })}>
+              <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+            </select>
+          </label>
+          <label className="check-field">
+            <input type="checkbox" checked={task.splittable} onChange={(event) => updateTask(task.id ?? "", { splittable: event.target.checked })} />
+            May be split into sessions
+          </label>
+        </div>
+      )}
+      <div className="task-card-actions">
+        <button onClick={() => setExpanded(!expanded)}>{expanded ? "Done editing" : "Edit all fields"}</button>
+        {!task.approved && (
+          <Button size="sm" onClick={() => approveTask(task.id ?? "")}>
+            <Check size={14} /> Approve task
+          </Button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function ReviewView() {
+  const { tasks, approveTask } = usePlanPilot();
+  const [filter, setFilter] = useState<"review" | "ready" | "all">("review");
+  const shown = tasks.filter((task) =>
+    filter === "all" ? true : filter === "review" ? task.reviewRequired : !task.reviewRequired,
+  );
+  const reviewCount = tasks.filter((task) => task.reviewRequired).length;
+  return (
+    <>
+      <PageHeading
+        eyebrow="REVIEW INTERPRETATION"
+        title="Check what PlanPilot understood."
+        detail="Low-confidence fields are marked individually. The source stays beside each interpretation."
+        actions={
+          <Button
+            onClick={() => tasks.filter((task) => task.reviewRequired).forEach((task) => approveTask(task.id ?? ""))}
+            disabled={reviewCount === 0}
+          >
+            <Check size={16} /> Approve reviewed tasks
+          </Button>
+        }
+      />
+      <div className="review-summary">
+        <div><strong>{tasks.length}</strong><span>Tasks found</span></div>
+        <div><strong>{reviewCount}</strong><span>Need review</span></div>
+        <div><strong>{tasks.filter((task) => !task.reviewRequired).length}</strong><span>Ready</span></div>
+        <div className="confidence-legend">
+          <span><i className="high" /> High confidence</span>
+          <span><i className="medium" /> Check context</span>
+          <span><i className="low" /> Review field</span>
+        </div>
+      </div>
+      <div className="filter-tabs">
+        {(["review", "ready", "all"] as const).map((item) => (
+          <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>
+            {item === "review" ? `Needs review (${reviewCount})` : item === "ready" ? `Ready (${tasks.length - reviewCount})` : `All (${tasks.length})`}
+          </button>
+        ))}
+      </div>
+      <div className="review-list">
+        {shown.length ? shown.map((task) => <TaskReviewCard task={task} key={task.id} />) : (
+          <EmptyState title="Nothing in this group" detail="Choose another filter or import more responsibilities." />
+        )}
+      </div>
+      <div className="sticky-review-action">
+        <div><strong>{tasks.length - reviewCount} of {tasks.length} tasks ready</strong><span>Unresolved fixed events will stay off the schedule.</span></div>
+        <Link className="button button-primary button-md" href="/schedule">
+          Build proposed schedule <ArrowRight size={16} />
+        </Link>
+      </div>
+    </>
+  );
+}
+
+export function UnschedulableTaskCard({ task }: { task: UnschedulableTask }) {
+  return (
+    <article className="unschedulable-card">
+      <span><AlertTriangle size={18} /></span>
+      <div>
+        <div><strong>{task.title}</strong><Badge tone="warning">{task.unscheduledMinutes} min unplaced</Badge></div>
+        <p>{task.explanation}</p>
+        <ul>{task.suggestedActions.slice(0, 2).map((action) => <li key={action}>{action}</li>)}</ul>
+      </div>
+    </article>
+  );
+}
+
+export function ScheduleSessionCard({
+  session,
+  selectable = true,
+}: {
+  session: PlannedSession;
+  selectable?: boolean;
+}) {
+  const {
+    toggleSessionLock,
+    rejectSession,
+    requestAnotherTime,
+    selectedSessionIds,
+    toggleSelectedSession,
+    approveSession,
+  } = usePlanPilot();
+  return (
+    <article
+      className={`schedule-session ${session.status === "approved" ? "session-approved" : ""}`}
+      draggable={!session.locked}
+      onDragEnd={() => !session.locked && requestAnotherTime(session.id)}
+    >
+      <div className="session-top">
+        {selectable && (
+          <label className="session-select">
+            <input
+              type="checkbox"
+              checked={selectedSessionIds.includes(session.id)}
+              onChange={() => toggleSelectedSession(session.id)}
+              aria-label={`Select ${session.title}`}
+            />
+          </label>
+        )}
+        <div className="session-time">
+          <strong>{formatTime(session.start)}–{formatTime(session.end)}</strong>
+          <span>{session.minutes} min</span>
+        </div>
+        <button
+          className="icon-button"
+          onClick={() => toggleSessionLock(session.id)}
+          aria-label={session.locked ? "Unlock session" : "Lock session"}
+        >
+          {session.locked ? <Lock size={15} /> : <LockOpen size={15} />}
+        </button>
+      </div>
+      <h3>{session.title}</h3>
+      <ScheduleReason reasons={session.reasonCodes} explanation={session.explanation} />
+      <div className="session-actions">
+        {session.status !== "approved" ? (
+          <button onClick={() => approveSession(session.id)}><Check size={13} /> Approve</button>
+        ) : <Badge tone="success"><Check size={12} /> Approved</Badge>}
+        <button onClick={() => requestAnotherTime(session.id)} disabled={session.locked}><RotateCcw size={13} /> Another time</button>
+        <button onClick={() => rejectSession(session.id)}><X size={13} /> Reject</button>
+      </div>
+    </article>
+  );
+}
+
+const WEEK_COLUMNS = [
+  { date: "2026-07-30", label: "Thu", day: "30" },
+  { date: "2026-07-31", label: "Fri", day: "31" },
+  { date: "2026-08-01", label: "Sat", day: "1" },
+  { date: "2026-08-02", label: "Sun", day: "2" },
+  { date: "2026-08-03", label: "Mon", day: "3" },
+];
+
+function ScheduleView() {
+  const {
+    proposal,
+    approveAllSessions,
+    selectedSessionIds,
+    approveSession,
+    exportApprovedSessions,
+    exportState,
+    requestAnotherTime,
+  } = usePlanPilot();
+  const [mode, setMode] = useState<"week" | "list">("week");
+  const [showReasons, setShowReasons] = useState(true);
+  const approveSelected = () => selectedSessionIds.forEach(approveSession);
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const sessionId = event.dataTransfer.getData("text/plain");
+    if (sessionId) requestAnotherTime(sessionId);
+  };
+  return (
+    <>
+      <PageHeading
+        eyebrow="PROPOSED SCHEDULE · VERSION 3"
+        title="A realistic plan for the week."
+        detail="Drag unlocked sessions, request another time, or approve only what works. Invalid placements are rejected."
+        actions={
+          <>
+            <Button variant="secondary" onClick={approveSelected} disabled={!selectedSessionIds.length}>
+              Approve selected ({selectedSessionIds.length})
+            </Button>
+            <Button onClick={approveAllSessions}><Check size={16} /> Approve complete plan</Button>
+          </>
+        }
+      />
+      <PlanHealthPanel compact />
+      <div className="schedule-toolbar">
+        <div className="view-toggle">
+          <button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}><CalendarDays size={15} /> Week</button>
+          <button className={mode === "list" ? "active" : ""} onClick={() => setMode("list")}><LayoutList size={15} /> Task list</button>
+        </div>
+        <label className="inline-check">
+          <input type="checkbox" checked={showReasons} onChange={(event) => setShowReasons(event.target.checked)} />
+          Show planning reasons
+        </label>
+        <span className="schedule-range">Jul 30 – Aug 3</span>
+      </div>
+      {mode === "week" ? (
+        <div className={`week-board ${showReasons ? "" : "hide-reasons"}`}>
+          {WEEK_COLUMNS.map((day) => {
+            const sessions = proposal.sessions.filter(
+              (session) =>
+                new Intl.DateTimeFormat("en-CA", {
+                  timeZone: "America/Los_Angeles",
+                  year: "numeric",
+                  month: "2-digit",
+                  day: "2-digit",
+                }).format(new Date(session.start)) === day.date,
+            );
+            return (
+              <div className="week-column" key={day.date} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
+                <header className={day.date === "2026-07-30" ? "today" : ""}>
+                  <span>{day.label}</span><strong>{day.day}</strong>
+                  {day.date === "2026-07-30" && <small>Today</small>}
+                </header>
+                <div className="day-capacity"><i style={{ width: `${Math.min(100, sessions.length * 24)}%` }} /><span>{sessions.reduce((sum, session) => sum + session.minutes, 0)}m planned</span></div>
+                <div className="day-sessions">
+                  {sessions.map((session) => (
+                    <div key={session.id} onDragStart={(event) => event.dataTransfer.setData("text/plain", session.id)}>
+                      <ScheduleSessionCard session={session} />
+                    </div>
+                  ))}
+                  {sessions.length === 0 && <span className="open-day">Open capacity</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className={`schedule-list-view ${showReasons ? "" : "hide-reasons"}`}>
+          {proposal.sessions.map((session) => (
+            <div key={session.id}>
+              <span className="list-day">{formatDay(session.start, true)}</span>
+              <ScheduleSessionCard session={session} />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="schedule-bottom-grid">
+        <section className="panel">
+          <div className="panel-heading"><div><h2>Work that does not fit yet</h2><p>No tasks are quietly squeezed into invalid time.</p></div></div>
+          <div className="unschedulable-list">
+            {proposal.unschedulable.map((task) => <UnschedulableTaskCard task={task} key={task.taskId} />)}
+          </div>
+        </section>
+        <section className="export-panel">
+          <span><CalendarDays size={21} /></span>
+          <div>
+            <Badge tone="info">Mock calendar</Badge>
+            <h2>Ready to export approved sessions?</h2>
+            <p>Only approved sessions are created. Imported events are never modified.</p>
+            <Button onClick={exportApprovedSessions} disabled={exportState === "loading"}>
+              {exportState === "loading" ? <RefreshCw className="spin" size={16} /> : <Cloud size={16} />}
+              Export approved
+            </Button>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
+export function ChangeDiff() {
+  const { replan, applyReplan } = usePlanPilot();
+  if (!replan) return null;
+  const change = replan.changes[0];
+  if (!change) return null;
+  return (
+    <section className="change-diff">
+      <div className="diff-heading">
+        <div><Badge tone="info">Proposed change</Badge><h2>One session moves. Everything else stays.</h2><p>{replan.explanation}</p></div>
+        <Badge tone="success">{replan.preservedSessionIds.length} sessions preserved</Badge>
+      </div>
+      <div className="diff-grid">
+        <article className="diff-before">
+          <span>Before</span>
+          {"before" in change ? (
+            <>
+              <strong>{change.before.title}</strong>
+              <p>{formatDay(change.before.start, true)}</p>
+              <b>{formatTime(change.before.start)}–{formatTime(change.before.end)}</b>
+              <Badge tone="danger">Missed</Badge>
+            </>
+          ) : null}
+        </article>
+        <MoveRight size={22} />
+        <article className="diff-after">
+          <span>After</span>
+          {"after" in change ? (
+            <>
+              <strong>{change.after.title}</strong>
+              <p>{formatDay(change.after.start, true)}</p>
+              <b>{formatTime(change.after.start)}–{formatTime(change.after.end)}</b>
+              <Badge tone="success">Valid opening</Badge>
+            </>
+          ) : <p>Unable to place remaining work.</p>}
+        </article>
+      </div>
+      <div className="diff-footer">
+        <p><ShieldCheck size={16} /> Locked, completed, and valid future sessions remain unchanged.</p>
+        <Button onClick={applyReplan}><Check size={15} /> Apply this change</Button>
+      </div>
+    </section>
+  );
+}
+
+function DailyReviewView() {
+  const { proposal, proposeReplan, replan } = usePlanPilot();
+  const [outcome, setOutcome] = useState<"completed" | "partial" | "missed" | "unnecessary" | null>(null);
+  const [minutes, setMinutes] = useState(20);
+  const next = proposal.sessions[0];
+  const submit = () => {
+    if (outcome === "partial") proposeReplan("partial", minutes);
+    if (outcome === "missed") proposeReplan("missed");
+  };
+  return (
+    <>
+      <PageHeading
+        eyebrow="DAILY REVIEW"
+        title="What actually happened?"
+        detail="Report outcomes honestly. PlanPilot proposes the smallest safe change before anything moves."
+      />
+      <div className="review-progress">
+        <div><span style={{ width: "33%" }} /></div>
+        <p>1 of 3 sessions reviewed</p>
+      </div>
+      <div className="daily-layout">
+        <section className="daily-card">
+          <div className="daily-card-head">
+            <div className="date-tile large"><span>TUE</span><strong>28</strong></div>
+            <div><Badge tone="warning">Needs an outcome</Badge><h2>Review for chemistry exam</h2><p>6:00–6:45 PM · 45 planned minutes</p></div>
+          </div>
+          <p className="daily-question">How did this session go?</p>
+          <div className="outcome-grid">
+            <button className={outcome === "completed" ? "selected success" : ""} onClick={() => setOutcome("completed")}><CheckCircle2 size={20} /><strong>Completed</strong><span>All planned work done</span></button>
+            <button className={outcome === "partial" ? "selected" : ""} onClick={() => setOutcome("partial")}><PanelLeft size={20} /><strong>Partially completed</strong><span>Some effort remains</span></button>
+            <button className={outcome === "missed" ? "selected warning" : ""} onClick={() => setOutcome("missed")}><RotateCcw size={20} /><strong>Missed</strong><span>Move the work forward</span></button>
+            <button className={outcome === "unnecessary" ? "selected" : ""} onClick={() => setOutcome("unnecessary")}><X size={20} /><strong>No longer needed</strong><span>Remove remaining work</span></button>
+          </div>
+          {outcome === "partial" && (
+            <div className="partial-input">
+              <label>Minutes completed<input type="number" min={0} max={45} value={minutes} onChange={(event) => setMinutes(Number(event.target.value))} /></label>
+              <span><strong>{45 - minutes} min</strong> will remain</span>
+            </div>
+          )}
+          <div className="daily-actions">
+            <span>Nothing moves until you approve the diff.</span>
+            <Button onClick={submit} disabled={!outcome || outcome === "completed" || outcome === "unnecessary"}>
+              Propose recovery <ArrowRight size={15} />
+            </Button>
+          </div>
+        </section>
+        <aside>
+          <section className="panel">
+            <span className="eyebrow">NEXT UP</span>
+            {next ? (
+              <>
+                <h3>{next.title}</h3>
+                <p>{formatDay(next.start, true)} · {formatTime(next.start)}</p>
+                <Badge>{next.minutes} minutes</Badge>
+              </>
+            ) : <p>No upcoming sessions.</p>}
+          </section>
+          <section className="calm-note"><ShieldCheck size={18} /><p><strong>Minimal disruption is the rule.</strong> Valid future sessions stay in place, even when unlocked.</p></section>
+        </aside>
+      </div>
+      {replan && <ChangeDiff />}
+    </>
+  );
+}
+
+function ChangesView() {
+  const { history } = usePlanPilot();
+  const iconFor = (icon: string) =>
+    icon === "move" ? MoveRight : icon === "calendar" ? CalendarDays : icon === "complete" ? CheckCircle2 : PencilLine;
+  return (
+    <>
+      <PageHeading
+        eyebrow="CHANGE HISTORY"
+        title="A clear record of meaningful changes."
+        detail="Deadline edits, approvals, schedule moves, outcomes, and calendar exports are append-only."
+      />
+      <div className="changes-layout">
+        <section className="panel history-panel">
+          <div className="history-filter">
+            <button className="active">All activity</button><button>Tasks</button><button>Schedule</button><button>Calendar</button>
+          </div>
+          <div className="history-timeline">
+            {history.map((item, index) => {
+              const Icon = iconFor(item.icon);
+              return (
+                <article key={item.id}>
+                  <div className="history-axis"><span><Icon size={16} /></span>{index < history.length - 1 && <i />}</div>
+                  <div><small>{item.at}</small><h3>{item.title}</h3><p>{item.detail}</p>{item.icon === "move" && <button>View before and after <ChevronRight size={13} /></button>}</div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+        <aside className="panel history-info">
+          <span><History size={20} /></span>
+          <h2>Why history matters</h2>
+          <p>You can trace how imported words became tasks, why a session moved, and when an external event was created.</p>
+          <div><strong>Not recorded</strong><span>Opening a card, changing a filter, or other inconsequential UI actions.</span></div>
+          <div><strong>Always recorded</strong><span>Deadline changes, approvals, moves, outcomes, and exports.</span></div>
+        </aside>
+      </div>
+    </>
+  );
+}
+
+function SettingsView() {
+  const {
+    planningMode,
+    setPlanningMode,
+    theme,
+    toggleTheme,
+    importText,
+    setImportText,
+  } = usePlanPilot();
+  const [message, setMessage] = useState<string>();
+  const confirmAction = (question: string, action: () => void, result: string) => {
+    if (window.confirm(question)) {
+      action();
+      setMessage(result);
+    }
+  };
+  return (
+    <>
+      <PageHeading eyebrow="SETTINGS" title="Planning rules and privacy." detail="Control buffer, reminders, integrations, source retention, and account data." />
+      {message && <div className="settings-message" role="status"><CheckCircle2 size={17} />{message}<button onClick={() => setMessage(undefined)}><X size={14} /></button></div>}
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          <a href="#planning" className="active">Planning preferences</a>
+          <a href="#calendar">Calendar</a>
+          <a href="#appearance">Appearance</a>
+          <a href="#privacy">Privacy & data</a>
+        </nav>
+        <div className="settings-panels">
+          <section className="panel settings-section" id="planning">
+            <div className="settings-heading"><span><BarChart3 size={19} /></span><div><h2>Planning mode</h2><p>Exact, testable density rules for every proposal.</p></div></div>
+            <div className="settings-modes">
+              {([
+                ["conservative", "25% buffer", "Up to 2 demanding blocks daily"],
+                ["balanced", "15% buffer", "Up to 3 demanding blocks daily"],
+                ["aggressive", "5% buffer", "Denser, never past hard constraints"],
+              ] as const).map(([value, label, detail]) => (
+                <button key={value} className={planningMode === value ? "active" : ""} onClick={() => setPlanningMode(value)}>
+                  <span>{planningMode === value && <Check size={13} />}</span>
+                  <div><strong>{value[0].toUpperCase() + value.slice(1)}</strong><p>{label} · {detail}</p></div>
+                </button>
+              ))}
+            </div>
+            <div className="settings-fields">
+              <label>Preferred focus block<select defaultValue="45"><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></label>
+              <label>Maximum focus block<select defaultValue="90"><option value="60">60 minutes</option><option value="90">90 minutes</option><option value="120">120 minutes</option></select></label>
+              <label>Break after demanding work<select defaultValue="10"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option></select></label>
+              <label>Calendar reminder<select defaultValue="10"><option value="0">None</option><option value="10">10 minutes before</option><option value="15">15 minutes before</option></select></label>
+            </div>
+          </section>
+          <section className="panel settings-section" id="calendar">
+            <div className="settings-heading"><span><CalendarDays size={19} /></span><div><h2>Google Calendar</h2><p>Read busy time and export approved PlanPilot sessions.</p></div></div>
+            <div className="connection-row">
+              <div className="google-mark">G</div>
+              <div><strong>Google Calendar</strong><p>Not connected · Mock calendar is active</p></div>
+              <Badge>OAuth keys required</Badge>
+              <button disabled className="button button-secondary button-sm">Connect</button>
+            </div>
+            <p className="settings-footnote"><ShieldCheck size={14} /> Production OAuth stays server-side, requests calendar event scope, and encrypts refresh tokens. Imported events are read-only.</p>
+          </section>
+          <section className="panel settings-section" id="appearance">
+            <div className="settings-heading"><span>{theme === "light" ? <Sun size={19} /> : <Moon size={19} />}</span><div><h2>Appearance</h2><p>High-contrast light and dark themes.</p></div></div>
+            <label className="switch-row"><span><strong>Dark mode</strong><small>Use the darker PlanPilot palette.</small></span><input type="checkbox" checked={theme === "dark"} onChange={toggleTheme} /></label>
+          </section>
+          <section className="panel settings-section danger-section" id="privacy">
+            <div className="settings-heading"><span><ShieldCheck size={19} /></span><div><h2>Privacy & data</h2><p>Source text is separate from normalized tasks so it can be deleted independently.</p></div></div>
+            <div className="data-action"><div><strong>Delete imported source text</strong><p>{importText ? "Current demo source is retained." : "No demo source text retained."}</p></div><Button variant="secondary" size="sm" onClick={() => confirmAction("Delete the imported source text? Normalized demo tasks will remain.", () => setImportText(""), "Imported source text deleted from this demo session.")}>Delete source</Button></div>
+            <div className="data-action"><div><strong>Delete task history</strong><p>Removes meaningful change records. This cannot be undone.</p></div><Button variant="secondary" size="sm" onClick={() => confirmAction("Permanently delete task history?", () => undefined, "Demo history was left unchanged because it is seeded sample data.")}>Delete history</Button></div>
+            <div className="data-action"><div><strong>Delete account and associated data</strong><p>Production uses cascading deletion after a fresh confirmation.</p></div><Button variant="danger" size="sm" onClick={() => confirmAction("Delete this account and all associated data? This action cannot be undone.", () => undefined, "Account deletion is disabled in demo mode.")}>Delete account</Button></div>
+            <p className="privacy-copy">PlanPilot sends imported text to OpenAI only when the OpenAI provider is explicitly configured; mock mode keeps extraction local to this app. No claim is made here about model training or provider retention beyond the configured provider’s policy.</p>
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export default function PlanPilotApp({ view }: { view: PlanPilotView }) {
+  if (view === "landing") return <LandingView />;
+  if (view === "login") return <LoginView />;
+  if (view === "onboarding") return <OnboardingView />;
+  const content =
+    view === "dashboard" ? <DashboardView /> :
+    view === "import" ? <ImportView /> :
+    view === "review" ? <ReviewView /> :
+    view === "schedule" ? <ScheduleView /> :
+    view === "daily-review" ? <DailyReviewView /> :
+    view === "changes" ? <ChangesView /> :
+    <SettingsView />;
+  return <AppShell view={view}>{content}</AppShell>;
+}
