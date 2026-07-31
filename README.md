@@ -6,6 +6,7 @@ PlanPilot turns messy responsibilities into a realistic, explainable, adjustable
 
 The local and deployed demo supports this vertical workflow:
 
+0. Clear the seeded demo workspace from any app screen to test the product from an uncluttered state. A browser refresh restores the sample data.
 1. Complete onboarding with time zone, waking boundaries, recurring availability, focus-block preferences, and an explicit planning mode.
 2. Paste unstructured text or load a TXT file.
 3. Extract flexible work, fixed events, finite recurring quotas, and ignored informational statements through a validated provider boundary.

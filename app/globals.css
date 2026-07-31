@@ -938,6 +938,8 @@ p {
 .topbar-context { align-items: center; color: var(--muted); display: flex; font-size: 11px; gap: 7px; }
 .sync-dot { background: var(--brand); border-radius: 50%; height: 7px; width: 7px; }
 .topbar-right { align-items: center; color: var(--muted); display: flex; font-size: 11px; gap: 18px; }
+.topbar-clear { align-items: center; background: var(--red-soft); border: 1px solid color-mix(in srgb, var(--red) 18%, transparent); border-radius: 7px; color: var(--red); display: flex; font-weight: 650; gap: 5px; padding: 7px 10px; }
+.topbar-clear:hover { border-color: color-mix(in srgb, var(--red) 42%, transparent); }
 .topbar-add { align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; display: flex; font-weight: 650; gap: 5px; padding: 7px 10px; }
 .app-content { margin: 0 auto; max-width: 1370px; padding: 38px 34px 90px; }
 
@@ -1424,6 +1426,8 @@ p {
   .app-content { padding: 24px 14px 80px; }
   .app-topbar { padding: 0 14px; }
   .topbar-right > span { display: none; }
+  .topbar-clear span { display: none; }
+  .topbar-clear { padding: 7px; }
   .page-heading { display: block; }
   .page-actions { justify-content: flex-start; margin-top: 16px; }
   .page-actions .button { flex: 1; }
@@ -1467,4 +1471,3 @@ p {
   .data-action { align-items: flex-start; gap: 12px; }
   .toast { bottom: 14px; left: 14px; right: 14px; }
 }
-

@@ -56,6 +56,7 @@ type PlanPilotContextValue = {
   setPlanningMode: (mode: PlanningMode) => void;
   theme: "light" | "dark";
   toggleTheme: () => void;
+  clearWorkspace: () => void;
   toast?: string;
   clearToast: () => void;
 };
@@ -419,6 +420,21 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const clearWorkspace = useCallback(() => {
+    setTasks([]);
+    setProposal(scheduleFor([], planningMode));
+    setImportText("");
+    setImportState("idle");
+    setImportError(undefined);
+    setSelectedSessionIds([]);
+    setExportState("idle");
+    setReplan(undefined);
+    setHistory([]);
+    setToast(
+      "Demo workspace cleared. Your planning preferences and theme were kept.",
+    );
+  }, [planningMode]);
+
   const value = useMemo<PlanPilotContextValue>(
     () => ({
       tasks,
@@ -448,6 +464,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       setPlanningMode,
       theme,
       toggleTheme,
+      clearWorkspace,
       toast,
       clearToast: () => setToast(undefined),
     }),
@@ -478,6 +495,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       setPlanningMode,
       theme,
       toggleTheme,
+      clearWorkspace,
       toast,
     ],
   );

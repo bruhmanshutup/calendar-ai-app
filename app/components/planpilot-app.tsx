@@ -352,8 +352,17 @@ function AppShell({
   view: PlanPilotView;
   children: ReactNode;
 }) {
-  const { theme, toggleTheme } = usePlanPilot();
+  const { theme, toggleTheme, clearWorkspace } = usePlanPilot();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const confirmClearWorkspace = () => {
+    if (
+      window.confirm(
+        "Clear all demo tasks, imported text, proposed sessions, recovery changes, selections, and history? Planning preferences and theme will be kept. Refreshing the page restores the sample workspace.",
+      )
+    ) {
+      clearWorkspace();
+    }
+  };
   return (
     <div className="app-shell">
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
@@ -425,6 +434,15 @@ function AppShell({
           </div>
           <div className="topbar-right">
             <span>Thu, Jul 30</span>
+            <button
+              type="button"
+              className="topbar-clear"
+              onClick={confirmClearWorkspace}
+              aria-label="Clear demo workspace"
+            >
+              <Trash2 size={16} />
+              <span>Clear demo</span>
+            </button>
             <Link href="/import" className="topbar-add">
               <Plus size={17} />
               Add
@@ -754,6 +772,27 @@ function DashboardView() {
     session.start.startsWith("2026-07-30") || formatDay(session.start).includes("Jul 30"),
   );
   const shownSessions = todaySessions.length > 0 ? todaySessions : proposal.sessions.slice(0, 3);
+  if (tasks.length === 0 && proposal.sessions.length === 0 && history.length === 0) {
+    return (
+      <>
+        <PageHeading
+          eyebrow="EMPTY DEMO WORKSPACE"
+          title="Start with a clean plan."
+          detail="There are no imported responsibilities, proposed sessions, or history yet. Add your own text to test the complete workflow."
+        />
+        <EmptyState
+          icon={Sparkles}
+          title="Your workspace is clear"
+          detail="Paste an assignment sheet, checklist, or email to see exactly what PlanPilot extracts and schedules."
+          action={
+            <Link href="/import" className="button button-primary button-md">
+              <Plus size={16} /> Add responsibilities
+            </Link>
+          }
+        />
+      </>
+    );
+  }
   return (
     <>
       <PageHeading
@@ -1093,6 +1132,26 @@ function ReviewView() {
     filter === "all" ? true : filter === "review" ? task.reviewRequired : !task.reviewRequired,
   );
   const reviewCount = tasks.filter((task) => task.reviewRequired).length;
+  if (tasks.length === 0) {
+    return (
+      <>
+        <PageHeading
+          eyebrow="REVIEW INTERPRETATION"
+          title="No tasks to review yet."
+          detail="Import your own responsibilities first. PlanPilot will preserve the source text and flag uncertain fields here."
+        />
+        <EmptyState
+          title="The review queue is empty"
+          detail="Add pasted text or a TXT file to test task extraction and field-level confidence."
+          action={
+            <Link href="/import" className="button button-primary button-md">
+              <Plus size={16} /> Import responsibilities
+            </Link>
+          }
+        />
+      </>
+    );
+  }
   return (
     <>
       <PageHeading
@@ -1220,6 +1279,7 @@ const WEEK_COLUMNS = [
 
 function ScheduleView() {
   const {
+    tasks,
     proposal,
     approveAllSessions,
     selectedSessionIds,
@@ -1236,6 +1296,27 @@ function ScheduleView() {
     const sessionId = event.dataTransfer.getData("text/plain");
     if (sessionId) requestAnotherTime(sessionId);
   };
+  if (tasks.length === 0) {
+    return (
+      <>
+        <PageHeading
+          eyebrow="PROPOSED SCHEDULE"
+          title="No schedule has been generated."
+          detail="A proposal appears after you import and review at least one responsibility."
+        />
+        <EmptyState
+          icon={CalendarDays}
+          title="Your week is open"
+          detail="Add responsibilities to test deterministic scheduling, workload risk, and planning explanations."
+          action={
+            <Link href="/import" className="button button-primary button-md">
+              <Plus size={16} /> Add responsibilities
+            </Link>
+          }
+        />
+      </>
+    );
+  }
   return (
     <>
       <PageHeading
@@ -1381,6 +1462,27 @@ function DailyReviewView() {
     if (outcome === "partial") proposeReplan("partial", minutes);
     if (outcome === "missed") proposeReplan("missed");
   };
+  if (!next) {
+    return (
+      <>
+        <PageHeading
+          eyebrow="DAILY REVIEW"
+          title="Nothing needs an outcome."
+          detail="Approved or proposed sessions will appear here when there is work to review."
+        />
+        <EmptyState
+          icon={CheckCircle2}
+          title="Daily review is clear"
+          detail="Create a schedule first, then return here to test completed, partial, missed, and unnecessary outcomes."
+          action={
+            <Link href="/import" className="button button-primary button-md">
+              <Plus size={16} /> Add responsibilities
+            </Link>
+          }
+        />
+      </>
+    );
+  }
   return (
     <>
       <PageHeading
@@ -1441,6 +1543,22 @@ function ChangesView() {
   const { history } = usePlanPilot();
   const iconFor = (icon: string) =>
     icon === "move" ? MoveRight : icon === "calendar" ? CalendarDays : icon === "complete" ? CheckCircle2 : PencilLine;
+  if (history.length === 0) {
+    return (
+      <>
+        <PageHeading
+          eyebrow="CHANGE HISTORY"
+          title="No meaningful changes yet."
+          detail="Task edits, approvals, schedule moves, outcomes, and calendar exports will appear here."
+        />
+        <EmptyState
+          icon={History}
+          title="History is empty"
+          detail="Use the app normally and PlanPilot will record only changes that affect your plan."
+        />
+      </>
+    );
+  }
   return (
     <>
       <PageHeading
