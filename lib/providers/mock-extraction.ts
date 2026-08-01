@@ -34,6 +34,8 @@ function estimateMinutes(text: string): {
   minutes: number;
   confidence: number;
   assumed: boolean;
+  source: "stated" | "heuristic";
+  rationale: string;
 } {
   const hours = /(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i.exec(text);
   if (hours) {
@@ -41,6 +43,8 @@ function estimateMinutes(text: string): {
       minutes: Math.round(Number(hours[1]) * 60),
       confidence: 0.98,
       assumed: false,
+      source: "stated",
+      rationale: "Used the duration stated in the source text.",
     };
   }
   const minutes = /(\d+)\s*(?:minutes?|mins?)/i.exec(text);
@@ -49,16 +53,36 @@ function estimateMinutes(text: string): {
       minutes: Number(minutes[1]),
       confidence: 0.98,
       assumed: false,
+      source: "stated",
+      rationale: "Used the duration stated in the source text.",
     };
   }
   const lower = text.toLocaleLowerCase();
   if (/exam|study|essay|report|proposal/.test(lower)) {
-    return { minutes: 90, confidence: 0.46, assumed: true };
+    return {
+      minutes: 90,
+      confidence: 0.46,
+      assumed: true,
+      source: "heuristic",
+      rationale: "Used a conservative local estimate for substantial focused work.",
+    };
   }
   if (/gym|workout|run|appointment/.test(lower)) {
-    return { minutes: 60, confidence: 0.48, assumed: true };
+    return {
+      minutes: 60,
+      confidence: 0.48,
+      assumed: true,
+      source: "heuristic",
+      rationale: "Used a typical local estimate for this kind of activity.",
+    };
   }
-  return { minutes: 45, confidence: 0.42, assumed: true };
+  return {
+    minutes: 45,
+    confidence: 0.42,
+    assumed: true,
+    source: "heuristic",
+    rationale: "Used a conservative default because no duration was stated.",
+  };
 }
 
 function categoryFor(text: string): TaskCategory {
@@ -284,6 +308,8 @@ function buildTask(
     fixedStartAt,
     fixedEndAt,
     estimatedMinutes: estimate.minutes,
+    effortEstimateSource: estimate.source,
+    effortEstimateRationale: estimate.rationale,
     priority: priority.priority,
     category,
     energyDemand:
@@ -295,7 +321,7 @@ function buildTask(
     splittable:
       /\bsplit|over several|across\b/i.test(line) ||
       (estimate.minutes > 60 && !fixed && !count),
-    minimumSessionMinutes: count ? estimate.minutes : 30,
+    minimumSessionMinutes: count ? estimate.minutes : Math.min(30, estimate.minutes),
     recurrence: count
       ? {
           frequency: "weekly",

@@ -27,6 +27,7 @@ import {
 } from "@/lib/demo-data";
 
 type ImportState = "idle" | "loading" | "success" | "error";
+type ExtractionMode = "ai" | "local";
 
 type PlanPilotContextValue = {
   tasks: ExtractedTask[];
@@ -34,6 +35,7 @@ type PlanPilotContextValue = {
   importText: string;
   setImportText: (text: string) => void;
   importState: ImportState;
+  extractionMode?: ExtractionMode;
   importError?: string;
   analyzeText: () => Promise<void>;
   updateTask: (id: string, patch: Partial<ExtractedTask>) => void;
@@ -98,6 +100,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     "Chemistry exam Friday at 5 PM — review chapters 7–9. About 3 hours.\nGo to the gym four times this week, 45 minutes each.\nReturn library books by Friday.\nAdvisor appointment Thursday at 3 PM.\nFYI: the library entrance moved to Oak Street.",
   );
   const [importState, setImportState] = useState<ImportState>("idle");
+  const [extractionMode, setExtractionMode] = useState<ExtractionMode>();
   const [importError, setImportError] = useState<string>();
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [exportState, setExportState] =
@@ -116,6 +119,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
 
   const analyzeText = useCallback(async () => {
     setImportState("loading");
+    setExtractionMode(undefined);
     setImportError(undefined);
     try {
       const response = await fetch("/api/extract", {
@@ -129,12 +133,14 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       });
       const body = (await response.json()) as {
         tasks?: ExtractedTask[];
+        extractionMode?: ExtractionMode;
         error?: { message: string };
       };
       if (!response.ok || !body.tasks) {
         throw new Error(body.error?.message ?? "Extraction failed.");
       }
       setTasks(body.tasks);
+      setExtractionMode(body.extractionMode);
       refresh(body.tasks);
       setImportState("success");
       setHistory((items) => [
@@ -143,7 +149,10 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           at: "Just now",
           icon: "edit",
           title: `${body.tasks?.length ?? 0} responsibilities interpreted`,
-          detail: "Source text is preserved beside every task for review.",
+          detail:
+            body.extractionMode === "ai"
+              ? "AI estimated effort and session length; source text remains available for review."
+              : "Local fallback estimates were used; source text remains available for review.",
         },
         ...items,
       ]);
@@ -438,6 +447,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     setProposal(scheduleFor([], planningMode));
     setImportText("");
     setImportState("idle");
+    setExtractionMode(undefined);
     setImportError(undefined);
     setSelectedSessionIds([]);
     setExportState("idle");
@@ -455,6 +465,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       importText,
       setImportText,
       importState,
+      extractionMode,
       importError,
       analyzeText,
       updateTask,
@@ -486,6 +497,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       proposal,
       importText,
       importState,
+      extractionMode,
       importError,
       analyzeText,
       updateTask,

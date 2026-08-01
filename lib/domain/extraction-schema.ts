@@ -24,6 +24,8 @@ export const extractedTaskSchema = z
     fixedStartAt: z.string().datetime({ offset: true }).optional(),
     fixedEndAt: z.string().datetime({ offset: true }).optional(),
     estimatedMinutes: z.number().int().positive().max(24 * 60).optional(),
+    effortEstimateSource: z.enum(["stated", "ai", "heuristic"]).optional(),
+    effortEstimateRationale: z.string().trim().min(1).max(300).optional(),
     priority: z.enum(["low", "medium", "high", "urgent"]),
     category: z.enum([
       "school",
@@ -77,6 +79,17 @@ export const extractedTaskSchema = z
           message: "Fixed end must occur after fixed start.",
         });
       }
+    }
+    if (
+      task.estimatedMinutes &&
+      task.minimumSessionMinutes &&
+      task.minimumSessionMinutes > task.estimatedMinutes
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["minimumSessionMinutes"],
+        message: "Minimum session length cannot exceed total estimated effort.",
+      });
     }
   });
 

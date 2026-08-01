@@ -901,6 +901,7 @@ function ImportView() {
     importText,
     setImportText,
     importState,
+    extractionMode,
     importError,
     analyzeText,
     tasks,
@@ -990,7 +991,12 @@ function ImportView() {
             <CheckCircle2 size={20} />
             <div>
               <strong>{tasks.length} responsibilities found</strong>
-              <p>{tasks.filter((task) => task.reviewRequired).length} need a quick review before scheduling.</p>
+              <p>
+                {tasks.filter((task) => task.reviewRequired).length} need a quick review before scheduling. {" "}
+                {extractionMode === "ai"
+                  ? "Effort and useful session length were estimated by AI."
+                  : "Local estimates were used because AI is not connected."}
+              </p>
             </div>
             <Link className="button button-primary button-sm" href="/tasks/review">Review tasks <ArrowRight size={14} /></Link>
           </div>
@@ -1044,6 +1050,16 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
         <div>
           <span>Effort</span>
           <strong>{task.estimatedMinutes ? `${task.estimatedMinutes} minutes` : "Not estimated"}</strong>
+          {task.effortEstimateSource && (
+            <Badge tone={task.effortEstimateSource === "ai" ? "success" : "neutral"}>
+              {task.effortEstimateSource === "ai"
+                ? "AI estimate"
+                : task.effortEstimateSource === "stated"
+                  ? "Stated duration"
+                  : "Local estimate"}
+            </Badge>
+          )}
+          {task.effortEstimateRationale && <p>{task.effortEstimateRationale}</p>}
           <FieldConfidenceIndicator label="Effort" confidence={task.fieldConfidence.estimatedMinutes} />
         </div>
         <div>

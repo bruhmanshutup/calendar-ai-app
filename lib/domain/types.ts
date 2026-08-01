@@ -32,6 +32,8 @@ export type ExtractedTask = {
   fixedStartAt?: string;
   fixedEndAt?: string;
   estimatedMinutes?: number;
+  effortEstimateSource?: "stated" | "ai" | "heuristic";
+  effortEstimateRationale?: string;
   priority: TaskPriority;
   category: TaskCategory;
   energyDemand: EnergyDemand;
@@ -223,4 +225,3 @@ export type ReplanProposal = {
   explanation: string;
   unschedulable?: UnschedulableTask;
 };
-

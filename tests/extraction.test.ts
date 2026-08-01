@@ -20,6 +20,23 @@ describe("extraction validation and mock interpretation", () => {
     expect(result.tasks[0].missingInformation).toContain(
       "No deadline was stated",
     );
+    expect(result.tasks[0]).toMatchObject({
+      effortEstimateSource: "heuristic",
+      estimatedMinutes: 90,
+    });
+  });
+
+  it("preserves stated effort and keeps the useful session within the estimate", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: "Email the advisor, 10 minutes.",
+    });
+    expect(result.tasks[0]).toMatchObject({
+      estimatedMinutes: 10,
+      minimumSessionMinutes: 10,
+      effortEstimateSource: "stated",
+      effortEstimateRationale: "Used the duration stated in the source text.",
+    });
   });
 
   it("distinguishes a fixed event from a deadline", async () => {
@@ -147,6 +164,22 @@ describe("extraction validation and mock interpretation", () => {
     expect(() =>
       extractionResultSchema.parse({
         tasks: [{ title: "" }],
+        ignoredStatements: [],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a minimum session longer than total estimated effort", () => {
+    expect(() =>
+      extractionResultSchema.parse({
+        tasks: [
+          task({
+            id: "invalid-effort",
+            title: "Invalid effort",
+            estimatedMinutes: 20,
+            minimumSessionMinutes: 30,
+          }),
+        ],
         ignoredStatements: [],
       }),
     ).toThrow();

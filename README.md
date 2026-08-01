@@ -78,15 +78,15 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-Mock mode is the default and requires no external credentials.
+Automatic mode is the default. It uses OpenAI when a server-side API key is configured and otherwise falls back to local deterministic extraction.
 
 ### Environment variables
 
 See `.env.example`. In particular:
 
-- `TASK_EXTRACTION_PROVIDER=mock` runs local deterministic extraction.
-- Set it to `openai` only after configuring `OPENAI_API_KEY`.
-- `OPENAI_MODEL` defaults to `gpt-5.6`.
+- `TASK_EXTRACTION_PROVIDER=auto` uses OpenAI when configured and otherwise uses local deterministic extraction.
+- Set it to `mock` to force local extraction or `openai` to require the AI provider.
+- `OPENAI_MODEL` defaults to `gpt-5.6-sol`.
 - Supabase’s anon key may be public; never expose the service-role key.
 - Provider refresh tokens must be encrypted with `PROVIDER_TOKEN_ENCRYPTION_SECRET`.
 
@@ -106,8 +106,8 @@ PlanPilot uses the Responses API with Structured Outputs and validates the resul
 
 1. Create a project API key.
 2. Set `OPENAI_API_KEY` in the server environment.
-3. Set `TASK_EXTRACTION_PROVIDER=openai`.
-4. Optionally set `OPENAI_MODEL`; the default is `gpt-5.6`.
+3. Leave `TASK_EXTRACTION_PROVIDER=auto` or set it to `openai` to require AI extraction.
+4. Optionally set `OPENAI_MODEL`; the default is `gpt-5.6-sol`.
 
 The extraction prompt receives the user’s IANA time zone and explicit current local date. Imported content and secrets are never logged by the application.
 
