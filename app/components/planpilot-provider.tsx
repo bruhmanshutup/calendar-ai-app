@@ -74,6 +74,19 @@ function scheduleFor(
   });
 }
 
+function currentLocalDate(timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 export function PlanPilotProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<ExtractedTask[]>(DEMO_TASKS);
   const [planningMode, setPlanningModeState] =
@@ -110,7 +123,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: importText,
-          currentLocalDate: "2026-07-30",
+          currentLocalDate: currentLocalDate(DEMO_PREFERENCES.timeZone),
           timeZone: DEMO_PREFERENCES.timeZone,
         }),
       });

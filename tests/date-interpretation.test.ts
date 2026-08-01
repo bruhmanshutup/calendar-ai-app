@@ -42,6 +42,40 @@ describe("date interpretation", () => {
     expect(result.instant).toBeUndefined();
   });
 
+  it("resolves ISO, numeric, and month-name calendar dates", () => {
+    expect(
+      resolveRelativeDate("2026-08-15", "2026-07-30", "UTC").date,
+    ).toBe("2026-08-15");
+    expect(
+      resolveRelativeDate("8/15/2026", "2026-07-30", "UTC").date,
+    ).toBe("2026-08-15");
+    expect(
+      resolveRelativeDate("Aug 15", "2026-07-30", "UTC").date,
+    ).toBe("2026-08-15");
+    expect(
+      resolveRelativeDate("15 August 2026", "2026-07-30", "UTC").date,
+    ).toBe("2026-08-15");
+  });
+
+  it("keeps ambiguous numeric dates usable but flags them for review", () => {
+    const result = resolveRelativeDate("8/9", "2026-07-30", "UTC");
+    expect(result.date).toBe("2026-08-09");
+    expect(result.ambiguous).toBe(true);
+    expect(result.explanation).toContain("month/day");
+  });
+
+  it("rolls a yearless calendar date forward when needed", () => {
+    expect(
+      resolveRelativeDate("July 15", "2026-07-30", "UTC").date,
+    ).toBe("2027-07-15");
+  });
+
+  it("rejects impossible calendar dates", () => {
+    const result = resolveRelativeDate("February 30", "2026-07-30", "UTC");
+    expect(result.date).toBeUndefined();
+    expect(result.ambiguous).toBe(true);
+  });
+
   it("resolves explicit due times in the user time zone", () => {
     const result = resolveRelativeDate(
       "Friday at 5 PM",
@@ -89,4 +123,3 @@ describe("date interpretation", () => {
     expect(parseClockTime("25:00")).toBeUndefined();
   });
 });
-

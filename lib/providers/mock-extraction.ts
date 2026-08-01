@@ -66,13 +66,16 @@ function categoryFor(text: string): TaskCategory {
   return "personal";
 }
 
-function titleFor(text: string): string {
+function titleFor(text: string, datePhrase?: string): string {
   return text
-    .replace(/^[-*•\d.)\s]+/, "")
-    .replace(/\s+(?:by|due)\s+(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday).*$/i, "")
-    .replace(/\s+\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?).*$/i, "")
+    .replace(/^\s*(?:[-*•]|\d+[.)]|\[[ x]\])\s*/i, "")
+    .replace(/^(?:task|to-?do|action item|reminder)\s*:\s*/i, "")
+    .replace(datePhrase ?? /$^/, " ")
+    .replace(/\b(?:by|before|on|due(?:\s+on)?)\s*$/i, "")
+    .replace(/\b(?:for\s+)?\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?)(?:\s+each)?\b/gi, " ")
+    .replace(/\s+/g, " ")
     .trim()
-    .replace(/[.!]+$/, "");
+    .replace(/[\s,;:.!—–-]+$/, "");
 }
 
 function recurrenceCount(text: string): number | undefined {
@@ -84,12 +87,29 @@ function recurrenceCount(text: string): number | undefined {
 }
 
 function extractDatePhrase(text: string): string | undefined {
-  const match =
-    /\b((?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))(?:\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?/i.exec(
-      text,
-    );
-  if (!match) return undefined;
-  return `${match[1]}${match[2] ? ` at ${match[2]}` : ""}`;
+  const timeSuffix =
+    "(?:\\s+(?:at\\s+)?(?:\\d{1,2}:\\d{2}(?:\\s*(?:am|pm))?|\\d{1,2}\\s*(?:am|pm)))?";
+  const patterns = [
+    new RegExp(
+      `\\b(?:next\\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)${timeSuffix}`,
+      "i",
+    ),
+    new RegExp(`\\b\\d{4}-\\d{1,2}-\\d{1,2}${timeSuffix}`, "i"),
+    new RegExp(`\\b\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?${timeSuffix}`, "i"),
+    new RegExp(
+      `\\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?${timeSuffix}`,
+      "i",
+    ),
+    new RegExp(
+      `\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:,?\\s+\\d{4})?${timeSuffix}`,
+      "i",
+    ),
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (match) return match[0].trim();
+  }
+  return undefined;
 }
 
 function localWeekWindow(
@@ -111,10 +131,6 @@ function localWeekWindow(
   };
 }
 
-function isInformationOnly(text: string): boolean {
-  return /^(?:fyi|note|reminder|information|background)\s*:/i.test(text);
-}
-
 function isFixedEvent(text: string): boolean {
   return /\b(appointment|meeting|class|flight|reservation|interview)\b/i.test(
     text,
@@ -125,8 +141,70 @@ function isDeadlineLanguage(text: string): boolean {
   return /\b(by|due|before|submit|complete|finish)\b/i.test(text);
 }
 
+function hasActionVerb(text: string): boolean {
+  return /\b(?:apply|attend|book|bring|build|buy|call|clean|complete|create|deliver|do|draft|email|exercise|finish|fix|go|make|meet|pay|pick\s+up|practice|prepare|read|register|remember\s+to|renew|return|review|run|schedule|send|study|submit|take|turn\s+in|update|upload|wash|write)\b/i.test(
+    text,
+  );
+}
+
+function hasTaskNoun(text: string): boolean {
+  return /\b(?:appointment|application|assignment|bill|birthday|deadline|dentist|dishes|doctor|errand|essay|exam|flight|form|groceries|gym|homework|interview|laundry|medication|meeting|payment|project|quiz|rent|report|reservation|taxes|test|therapy|workout)\b/i.test(
+    text,
+  );
+}
+
+function isClearlyNonTask(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    /^(?:from|to|cc|bcc|subject|sent)\s*:/i.test(trimmed) ||
+    /^(?:hi|hello|hey|thanks|thank you|best|regards|sincerely)[\s,!.-]*(?:\w+)?$/i.test(
+      trimmed,
+    ) ||
+    /^(?:https?:\/\/|www\.)\S+$/i.test(trimmed) ||
+    (!hasActionVerb(trimmed) &&
+      /\b(?:available|cancelled|canceled|closed|delayed|located|moved|open|rescheduled)\b/i.test(
+        trimmed,
+      ))
+  );
+}
+
+function isTaskCandidate(text: string, datePhrase?: string): boolean {
+  if (isClearlyNonTask(text)) return false;
+  const title = titleFor(text, datePhrase);
+  if (!title || title.toLocaleLowerCase() === datePhrase?.toLocaleLowerCase()) {
+    return false;
+  }
+  const action = hasActionVerb(text);
+  if (
+    /^(?:fyi|note|reminder|information|background)\s*:/i.test(text) &&
+    !action
+  ) {
+    return false;
+  }
+  const titleWords = title.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? [];
+  return (
+    action ||
+    hasTaskNoun(text) ||
+    isFixedEvent(text) ||
+    isDeadlineLanguage(text) ||
+    Boolean(recurrenceCount(text)) ||
+    Boolean(datePhrase && titleWords.length >= 2)
+  );
+}
+
+function ignoredReason(text: string): string {
+  if (/^(?:fyi|note|reminder|information|background)\s*:/i.test(text)) {
+    return "Informational reminder with no concrete user action.";
+  }
+  if (isClearlyNonTask(text)) {
+    return "Metadata, greeting, link, or status update; no task was created.";
+  }
+  return "No concrete task or scheduled responsibility was identified.";
+}
+
 function buildTask(
   line: string,
+  datePhrase: string | undefined,
   interpreted: InterpretedDate | undefined,
   input: ExtractionInput,
   index: number,
@@ -158,7 +236,7 @@ function buildTask(
 
   return {
     id: `imported-${index + 1}`,
-    title: titleFor(line),
+    title: titleFor(line, datePhrase),
     taskType,
     dueDate: !fixed ? interpreted?.date : undefined,
     dueTime: !fixed ? interpreted?.time : undefined,
@@ -230,14 +308,14 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
     const ignoredStatements: ExtractionResult["ignoredStatements"] = [];
 
     lines.forEach((line, index) => {
-      if (isInformationOnly(line)) {
+      const datePhrase = extractDatePhrase(line);
+      if (!isTaskCandidate(line, datePhrase)) {
         ignoredStatements.push({
           sourceText: line,
-          reason: "Informational statement; no action was requested.",
+          reason: ignoredReason(line),
         });
         return;
       }
-      const datePhrase = extractDatePhrase(line);
       const interpreted = datePhrase
         ? resolveRelativeDate(
             datePhrase,
@@ -245,7 +323,7 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
             input.timeZone,
           )
         : undefined;
-      tasks.push(buildTask(line, interpreted, input, index));
+      tasks.push(buildTask(line, datePhrase, interpreted, input, index));
     });
 
     return validateAndDedupeExtraction({ tasks, ignoredStatements });

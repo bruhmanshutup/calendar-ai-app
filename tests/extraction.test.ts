@@ -52,6 +52,71 @@ describe("extraction validation and mock interpretation", () => {
     expect(result.ignoredStatements).toHaveLength(1);
   });
 
+  it("recognizes dates placed directly next to responsibilities", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: "Submit biology lab 08/15/2026\nChemistry exam — Aug 18",
+    });
+    expect(result.tasks).toHaveLength(2);
+    expect(result.tasks[0]).toMatchObject({
+      title: "Submit biology lab",
+      dueDate: "2026-08-15",
+    });
+    expect(result.tasks[1]).toMatchObject({
+      title: "Chemistry exam",
+      dueDate: "2026-08-18",
+    });
+  });
+
+  it("keeps a dated responsibility even without a known task keyword", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: "Car oil change Aug 20",
+    });
+    expect(result.tasks[0]).toMatchObject({
+      title: "Car oil change",
+      dueDate: "2026-08-20",
+    });
+  });
+
+  it("filters noise instead of converting every fragment into a task", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: [
+        "Hi Zach,",
+        "Subject: Weekly updates",
+        "The office is closed Friday.",
+        "banana",
+        "https://example.com/context",
+        "Submit the expense report Friday.",
+        "Thanks,",
+      ].join("\n"),
+    });
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].title).toBe("Submit the expense report");
+    expect(result.ignoredStatements).toHaveLength(6);
+  });
+
+  it("keeps actionable reminders and ignores informational reminders", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: "Reminder: submit timesheet Friday\nReminder: office closed Friday",
+    });
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].title).toBe("submit timesheet");
+    expect(result.ignoredStatements).toHaveLength(1);
+    expect(result.ignoredStatements[0].sourceText).toContain("office closed");
+  });
+
+  it("ignores standalone dates and random words", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: "8/15/2026\nFriday\nmiscellaneous",
+    });
+    expect(result.tasks).toHaveLength(0);
+    expect(result.ignoredStatements).toHaveLength(3);
+  });
+
   it("represents a finite weekly quota", async () => {
     const result = await new MockTaskExtractionProvider().extractTasks({
       ...input,
