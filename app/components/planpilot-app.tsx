@@ -993,8 +993,8 @@ function ImportView() {
               <strong>{tasks.length} responsibilities found</strong>
               <p>
                 {tasks.filter((task) => task.reviewRequired).length} need a quick review before scheduling. {" "}
-                {extractionMode === "ai"
-                  ? "Effort and useful session length were estimated by AI."
+                {extractionMode !== "local"
+                  ? `Effort and useful session length were estimated by ${extractionMode === "gemini" ? "Gemini" : "OpenAI"}.`
                   : "Local estimates were used because AI is not connected."}
               </p>
             </div>

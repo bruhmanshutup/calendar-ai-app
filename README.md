@@ -78,14 +78,15 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-Automatic mode is the default. It uses OpenAI when a server-side API key is configured and otherwise falls back to local deterministic extraction.
+Automatic mode is the default. It prefers Gemini, then OpenAI, when a corresponding server-side API key is configured and otherwise falls back to local deterministic extraction.
 
 ### Environment variables
 
 See `.env.example`. In particular:
 
-- `TASK_EXTRACTION_PROVIDER=auto` uses OpenAI when configured and otherwise uses local deterministic extraction.
-- Set it to `mock` to force local extraction or `openai` to require the AI provider.
+- `TASK_EXTRACTION_PROVIDER=auto` prefers Gemini, then OpenAI, and otherwise uses local deterministic extraction.
+- Set it to `mock`, `gemini`, or `openai` to force a specific provider.
+- `GEMINI_MODEL` defaults to `gemini-3.1-flash-lite`.
 - `OPENAI_MODEL` defaults to `gpt-5.6-sol`.
 - Supabase’s anon key may be public; never expose the service-role key.
 - Provider refresh tokens must be encrypted with `PROVIDER_TOKEN_ENCRYPTION_SECRET`.
@@ -110,6 +111,23 @@ PlanPilot uses the Responses API with Structured Outputs and validates the resul
 4. Optionally set `OPENAI_MODEL`; the default is `gpt-5.6-sol`.
 
 The extraction prompt receives the user’s IANA time zone and explicit current local date. Imported content and secrets are never logged by the application.
+
+## Gemini configuration
+
+PlanPilot can use Gemini structured output for responsibility extraction and AI effort estimates.
+
+1. Create a Gemini API key in Google AI Studio.
+2. Store it server-side as `GEMINI_API_KEY`.
+3. Leave `TASK_EXTRACTION_PROVIDER=auto` or set it to `gemini` to require Gemini.
+4. Optionally set `GEMINI_MODEL`; the default is `gemini-3.1-flash-lite`.
+
+Gemini keys remain server-side and are sent only in the API authentication header.
+
+Official references:
+
+- [Gemini structured outputs](https://ai.google.dev/gemini-api/docs/structured-output)
+- [Gemini API key security](https://ai.google.dev/gemini-api/docs/api-key)
+- [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
 
 Official references:
 

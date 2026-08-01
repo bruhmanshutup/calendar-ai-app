@@ -27,7 +27,7 @@ import {
 } from "@/lib/demo-data";
 
 type ImportState = "idle" | "loading" | "success" | "error";
-type ExtractionMode = "ai" | "local";
+type ExtractionMode = "gemini" | "openai" | "local";
 
 type PlanPilotContextValue = {
   tasks: ExtractedTask[];
@@ -150,8 +150,8 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           icon: "edit",
           title: `${body.tasks?.length ?? 0} responsibilities interpreted`,
           detail:
-            body.extractionMode === "ai"
-              ? "AI estimated effort and session length; source text remains available for review."
+            body.extractionMode !== "local"
+              ? `${body.extractionMode === "gemini" ? "Gemini" : "OpenAI"} estimated effort and session length; source text remains available for review.`
               : "Local fallback estimates were used; source text remains available for review.",
         },
         ...items,
