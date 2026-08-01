@@ -29,6 +29,7 @@ Non-negotiable rules:
 - "Chemistry exam — Aug 15" is a dated responsibility. "FYI: library entrance moved" is ignored.
 - A date without a time must keep dueTime absent.
 - Use fixed_time only for an occurrence at a scheduled time. A deadline remains flexible even when it includes a due time.
+- Let deadline proximity gently raise priority: an overdue task or one due on the current local date is urgent; a task due within the next two calendar days is high. Dates farther away do not raise priority by themselves, and explicit urgent wording still takes precedence.
 - A fixed event without an end time may leave fixedEndAt absent and must name that missing information.
 - Estimate effort conservatively and lower field confidence when it is inferred.
 - Do not assume work is splittable unless the wording or task shape supports it.

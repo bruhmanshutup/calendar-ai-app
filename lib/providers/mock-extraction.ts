@@ -1,4 +1,10 @@
-import { addHours, endOfWeek, startOfWeek } from "date-fns";
+import {
+  addHours,
+  differenceInCalendarDays,
+  endOfWeek,
+  parseISO,
+  startOfWeek,
+} from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import {
   resolveRelativeDate,
@@ -10,6 +16,7 @@ import type {
   ExtractionInput,
   ExtractionResult,
   TaskCategory,
+  TaskPriority,
 } from "@/lib/domain/types";
 import type { TaskExtractionProvider } from "./task-extraction";
 
@@ -141,6 +148,34 @@ function isDeadlineLanguage(text: string): boolean {
   return /\b(by|due|before|submit|complete|finish)\b/i.test(text);
 }
 
+function priorityFor(
+  text: string,
+  dueDate: string | undefined,
+  currentLocalDate: string,
+): { priority: TaskPriority; confidence: number } {
+  if (/\b(?:urgent|asap)\b/i.test(text)) {
+    return { priority: "urgent", confidence: 0.95 };
+  }
+
+  if (dueDate) {
+    const daysUntilDue = differenceInCalendarDays(
+      parseISO(dueDate),
+      parseISO(currentLocalDate),
+    );
+    if (daysUntilDue <= 0) {
+      return { priority: "urgent", confidence: 0.94 };
+    }
+    if (daysUntilDue <= 2) {
+      return { priority: "high", confidence: 0.9 };
+    }
+  }
+
+  if (/\b(?:important|high priority)\b/i.test(text)) {
+    return { priority: "high", confidence: 0.92 };
+  }
+  return { priority: "medium", confidence: dueDate ? 0.74 : 0.55 };
+}
+
 function hasActionVerb(text: string): boolean {
   return /\b(?:apply|attend|book|bring|build|buy|call|clean|complete|create|deliver|do|draft|email|exercise|finish|fix|go|make|meet|pay|pick\s+up|practice|prepare|read|register|remember\s+to|renew|return|review|run|schedule|send|study|submit|take|turn\s+in|update|upload|wash|write)\b/i.test(
     text,
@@ -214,6 +249,11 @@ function buildTask(
   const fixed = isFixedEvent(line) && !isDeadlineLanguage(line);
   const taskType = count ? "recurring_goal" : fixed ? "fixed_time" : "flexible";
   const category = categoryFor(line);
+  const priority = priorityFor(
+    line,
+    !fixed ? interpreted?.date : undefined,
+    input.currentLocalDate,
+  );
   const fixedStartAt = fixed ? interpreted?.instant : undefined;
   const fixedEndAt =
     fixedStartAt && /\bfor\s+\d+/i.test(line)
@@ -244,11 +284,7 @@ function buildTask(
     fixedStartAt,
     fixedEndAt,
     estimatedMinutes: estimate.minutes,
-    priority: /\burgent|asap\b/i.test(line)
-      ? "urgent"
-      : /\bimportant|high priority\b/i.test(line)
-        ? "high"
-        : "medium",
+    priority: priority.priority,
     category,
     energyDemand:
       category === "school" || category === "work"
@@ -275,9 +311,7 @@ function buildTask(
       dueDate: interpreted?.date ? 0.92 : undefined,
       dueTime: interpreted?.time ? 0.92 : undefined,
       estimatedMinutes: estimate.confidence,
-      priority: /\burgent|asap|important|high priority\b/i.test(line)
-        ? 0.92
-        : 0.55,
+      priority: priority.confidence,
       recurrence: count ? 0.98 : undefined,
     },
     missingInformation,

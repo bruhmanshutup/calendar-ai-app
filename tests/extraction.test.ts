@@ -68,6 +68,22 @@ describe("extraction validation and mock interpretation", () => {
     });
   });
 
+  it("raises priority as a task approaches its deadline", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: [
+        "Submit timesheet 7/30/2026",
+        "Return library books 8/1/2026",
+        "Car oil change Aug 20",
+      ].join("\n"),
+    });
+    expect(result.tasks.map((task) => task.priority)).toEqual([
+      "urgent",
+      "high",
+      "medium",
+    ]);
+  });
+
   it("keeps a dated responsibility even without a known task keyword", async () => {
     const result = await new MockTaskExtractionProvider().extractTasks({
       ...input,
