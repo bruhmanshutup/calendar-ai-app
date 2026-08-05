@@ -60,6 +60,11 @@ export type ExtractedTask = {
   sourceText: string;
   approved?: boolean;
   reviewRequired?: boolean;
+  completed?: boolean;
+  completedAt?: string;
+  completedMinutes?: number;
+  cancelled?: boolean;
+  cancelledAt?: string;
 };
 
 export type IgnoredStatement = {
@@ -137,8 +142,18 @@ export type PlannedSession = {
   start: string;
   end: string;
   minutes: number;
-  status: "proposed" | "approved" | "completed";
+  status:
+    | "proposed"
+    | "approved"
+    | "in_progress"
+    | "completed"
+    | "partial"
+    | "missed"
+    | "unnecessary";
   locked: boolean;
+  reviewedAt?: string;
+  reviewAfter?: string;
+  minutesCompleted?: number;
   reasonCodes: ScheduleReasonCode[];
   explanation: string;
 };
@@ -224,4 +239,32 @@ export type ReplanProposal = {
   preservedSessionIds: string[];
   explanation: string;
   unschedulable?: UnschedulableTask;
+};
+
+export type SessionOutcome =
+  | "completed"
+  | "partial"
+  | "missed"
+  | "unnecessary";
+
+export type SessionReview = {
+  id: string;
+  sessionId: string;
+  taskId: string;
+  title: string;
+  scheduledStart: string;
+  scheduledEnd: string;
+  outcome: SessionOutcome;
+  plannedMinutes: number;
+  completedMinutes: number;
+  remainingMinutes: number;
+  reviewedAt: string;
+};
+
+export type HistoryItem = {
+  id: string;
+  at: string;
+  icon: "edit" | "calendar" | "move" | "complete";
+  title: string;
+  detail: string;
 };

@@ -85,6 +85,9 @@ export function proposeMinimalReplan(input: ReplanInput): ReplanProposal {
         reason !== "MOVED_AFTER_MISSED" && reason !== "STABILITY_PRESERVED",
     ),
   ];
+  replacement.id = `${input.session.id}-recovery`;
+  replacement.taskId = input.session.taskId;
+  replacement.title = `${input.task.title} — remaining`;
   replacement.explanation =
     input.outcome === "partial"
       ? `You completed ${completed} of ${originalMinutes} minutes. The remaining ${remainingMinutes} minutes fit here. No other sessions need to move.`

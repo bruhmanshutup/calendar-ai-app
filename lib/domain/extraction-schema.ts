@@ -62,6 +62,11 @@ export const extractedTaskSchema = z
     sourceText: z.string().trim().min(1).max(4000),
     approved: z.boolean().optional(),
     reviewRequired: z.boolean().optional(),
+    completed: z.boolean().optional(),
+    completedAt: z.string().datetime({ offset: true }).optional(),
+    completedMinutes: z.number().int().min(0).optional(),
+    cancelled: z.boolean().optional(),
+    cancelledAt: z.string().datetime({ offset: true }).optional(),
   })
   .superRefine((task, context) => {
     if (task.dueTime && !task.dueDate) {

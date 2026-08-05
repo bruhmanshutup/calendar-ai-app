@@ -120,6 +120,27 @@ function formatDay(value: string, long = false): string {
   }).format(new Date(value));
 }
 
+function formatToday(long = false): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: long ? "long" : "short",
+    month: long ? "long" : "short",
+    day: "numeric",
+  }).format(new Date());
+}
+
+function localDateKey(value = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 function shortDate(value?: string): string {
   if (!value) return "Not specified";
   return new Intl.DateTimeFormat("en-US", {
@@ -352,12 +373,18 @@ function AppShell({
   view: PlanPilotView;
   children: ReactNode;
 }) {
-  const { theme, toggleTheme, clearWorkspace } = usePlanPilot();
+  const {
+    theme,
+    toggleTheme,
+    clearWorkspace,
+    reviewQueue,
+    workspaceStatus,
+  } = usePlanPilot();
   const [mobileOpen, setMobileOpen] = useState(false);
   const confirmClearWorkspace = () => {
     if (
       window.confirm(
-        "Clear all demo tasks, imported text, proposed sessions, recovery changes, selections, and history? Planning preferences and theme will be kept. Refreshing the page restores the sample workspace.",
+        "Clear all tasks, imported text, scheduled sessions, review outcomes, recovery changes, selections, and history? Planning preferences and theme will be kept. This cannot be undone.",
       )
     ) {
       clearWorkspace();
@@ -387,7 +414,9 @@ function AppShell({
               >
                 <Icon size={18} />
                 <span>{item.label}</span>
-                {item.view === "daily-review" && <i>1</i>}
+                {item.view === "daily-review" && reviewQueue.length > 0 && (
+                  <i>{reviewQueue.length}</i>
+                )}
               </Link>
             );
           })}
@@ -411,10 +440,10 @@ function AppShell({
           </button>
         </nav>
         <div className="profile-chip">
-          <span>AM</span>
+          <span>PP</span>
           <div>
-            <strong>Alex Morgan</strong>
-            <small>Demo workspace</small>
+            <strong>Personal plan</strong>
+            <small>Private workspace</small>
           </div>
           <MoreHorizontal size={17} />
         </div>
@@ -430,18 +459,22 @@ function AppShell({
           </button>
           <div className="topbar-context">
             <span className="sync-dot" />
-            Mock providers active
+            {workspaceStatus === "loading"
+              ? "Loading workspace"
+              : workspaceStatus === "ready"
+                ? "Workspace saved"
+                : "Storage unavailable"}
           </div>
           <div className="topbar-right">
-            <span>Thu, Jul 30</span>
+            <span>{formatToday()}</span>
             <button
               type="button"
               className="topbar-clear"
               onClick={confirmClearWorkspace}
-              aria-label="Clear demo workspace"
+              aria-label="Clear workspace"
             >
               <Trash2 size={16} />
-              <span>Clear demo</span>
+              <span>Clear all</span>
             </button>
             <Link href="/import" className="topbar-add">
               <Plus size={17} />
@@ -769,16 +802,16 @@ function PageHeading({
 function DashboardView() {
   const { proposal, tasks, history } = usePlanPilot();
   const todaySessions = proposal.sessions.filter((session) =>
-    session.start.startsWith("2026-07-30") || formatDay(session.start).includes("Jul 30"),
+    localDateKey(new Date(session.start)) === localDateKey(),
   );
-  const shownSessions = todaySessions.length > 0 ? todaySessions : proposal.sessions.slice(0, 3);
+  const shownSessions = todaySessions;
   if (tasks.length === 0 && proposal.sessions.length === 0 && history.length === 0) {
     return (
       <>
         <PageHeading
-          eyebrow="EMPTY DEMO WORKSPACE"
+          eyebrow="EMPTY WORKSPACE"
           title="Start with a clean plan."
-          detail="There are no imported responsibilities, proposed sessions, or history yet. Add your own text to test the complete workflow."
+          detail="There are no imported responsibilities, proposed sessions, or history yet. Add your responsibilities to build a plan."
         />
         <EmptyState
           icon={Sparkles}
@@ -796,9 +829,9 @@ function DashboardView() {
   return (
     <>
       <PageHeading
-        eyebrow="THURSDAY, JULY 30"
-        title="Good morning, Alex."
-        detail="Your plan is mostly on track. One workload risk needs a decision."
+        eyebrow={formatToday(true).toUpperCase()}
+        title="Your plan at a glance."
+        detail={proposal.planHealth.summary}
         actions={
           <Link href="/import" className="button button-primary button-md">
             <Plus size={16} /> Add responsibilities
@@ -817,6 +850,9 @@ function DashboardView() {
               <Link href="/schedule">View week <ArrowRight size={15} /></Link>
             </div>
             <div className="today-list">
+              {shownSessions.length === 0 && (
+                <p className="open-day">No sessions are scheduled for today.</p>
+              )}
               {shownSessions.map((session, index) => (
                 <article key={session.id} className="today-item">
                   <div className="today-time">
@@ -1243,14 +1279,16 @@ export function ScheduleSessionCard({
     toggleSelectedSession,
     approveSession,
   } = usePlanPilot();
+  const actionable = session.status === "proposed" || session.status === "approved";
+  const statusLabel = session.status.replace("_", " ");
   return (
     <article
       className={`schedule-session ${session.status === "approved" ? "session-approved" : ""}`}
-      draggable={!session.locked}
-      onDragEnd={() => !session.locked && requestAnotherTime(session.id)}
+      draggable={actionable && !session.locked}
+      onDragEnd={() => actionable && !session.locked && requestAnotherTime(session.id)}
     >
       <div className="session-top">
-        {selectable && (
+        {selectable && session.status === "proposed" && (
           <label className="session-select">
             <input
               type="checkbox"
@@ -1275,23 +1313,30 @@ export function ScheduleSessionCard({
       <h3>{session.title}</h3>
       <ScheduleReason reasons={session.reasonCodes} explanation={session.explanation} />
       <div className="session-actions">
-        {session.status !== "approved" ? (
+        {session.status === "proposed" ? (
           <button onClick={() => approveSession(session.id)}><Check size={13} /> Approve</button>
-        ) : <Badge tone="success"><Check size={12} /> Approved</Badge>}
-        <button onClick={() => requestAnotherTime(session.id)} disabled={session.locked}><RotateCcw size={13} /> Another time</button>
-        <button onClick={() => rejectSession(session.id)}><X size={13} /> Reject</button>
+        ) : <Badge tone={session.status === "approved" || session.status === "completed" ? "success" : "neutral"}><Check size={12} /> {statusLabel}</Badge>}
+        {actionable && <button onClick={() => requestAnotherTime(session.id)} disabled={session.locked}><RotateCcw size={13} /> Another time</button>}
+        {actionable && <button onClick={() => rejectSession(session.id)}><X size={13} /> Reject</button>}
       </div>
     </article>
   );
 }
 
-const WEEK_COLUMNS = [
-  { date: "2026-07-30", label: "Thu", day: "30" },
-  { date: "2026-07-31", label: "Fri", day: "31" },
-  { date: "2026-08-01", label: "Sat", day: "1" },
-  { date: "2026-08-02", label: "Sun", day: "2" },
-  { date: "2026-08-03", label: "Mon", day: "3" },
-];
+function scheduleColumns() {
+  const base = new Date(`${localDateKey()}T12:00:00Z`);
+  return Array.from({ length: 5 }, (_, offset) => {
+    const date = new Date(base);
+    date.setUTCDate(base.getUTCDate() + offset);
+    const key = date.toISOString().slice(0, 10);
+    return {
+      date: key,
+      label: new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(date),
+      day: new Intl.DateTimeFormat("en-US", { day: "numeric", timeZone: "UTC" }).format(date),
+      range: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(date),
+    };
+  });
+}
 
 function ScheduleView() {
   const {
@@ -1306,6 +1351,7 @@ function ScheduleView() {
   } = usePlanPilot();
   const [mode, setMode] = useState<"week" | "list">("week");
   const [showReasons, setShowReasons] = useState(true);
+  const weekColumns = scheduleColumns();
   const approveSelected = () => selectedSessionIds.forEach(approveSession);
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1323,7 +1369,7 @@ function ScheduleView() {
         <EmptyState
           icon={CalendarDays}
           title="Your week is open"
-          detail="Add responsibilities to test deterministic scheduling, workload risk, and planning explanations."
+          detail="Add responsibilities to generate a deadline-aware schedule with workload risk and planning explanations."
           action={
             <Link href="/import" className="button button-primary button-md">
               <Plus size={16} /> Add responsibilities
@@ -1358,11 +1404,11 @@ function ScheduleView() {
           <input type="checkbox" checked={showReasons} onChange={(event) => setShowReasons(event.target.checked)} />
           Show planning reasons
         </label>
-        <span className="schedule-range">Jul 30 – Aug 3</span>
+        <span className="schedule-range">{weekColumns[0].range} – {weekColumns.at(-1)?.range}</span>
       </div>
       {mode === "week" ? (
         <div className={`week-board ${showReasons ? "" : "hide-reasons"}`}>
-          {WEEK_COLUMNS.map((day) => {
+          {weekColumns.map((day) => {
             const sessions = proposal.sessions.filter(
               (session) =>
                 new Intl.DateTimeFormat("en-CA", {
@@ -1374,9 +1420,9 @@ function ScheduleView() {
             );
             return (
               <div className="week-column" key={day.date} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
-                <header className={day.date === "2026-07-30" ? "today" : ""}>
+                <header className={day.date === localDateKey() ? "today" : ""}>
                   <span>{day.label}</span><strong>{day.day}</strong>
-                  {day.date === "2026-07-30" && <small>Today</small>}
+                  {day.date === localDateKey() && <small>Today</small>}
                 </header>
                 <div className="day-capacity"><i style={{ width: `${Math.min(100, sessions.length * 24)}%` }} /><span>{sessions.reduce((sum, session) => sum + session.minutes, 0)}m planned</span></div>
                 <div className="day-sessions">
@@ -1470,80 +1516,136 @@ export function ChangeDiff() {
 }
 
 function DailyReviewView() {
-  const { proposal, proposeReplan, replan } = usePlanPilot();
+  const {
+    proposal,
+    replan,
+    reviewQueue,
+    sessionReviews,
+    reviewSession,
+    delaySessionReview,
+  } = usePlanPilot();
   const [outcome, setOutcome] = useState<"completed" | "partial" | "missed" | "unnecessary" | null>(null);
   const [minutes, setMinutes] = useState(20);
-  const next = proposal.sessions[0];
+  const [activeSessionId, setActiveSessionId] = useState<string>();
+  const next = reviewQueue[0];
+  const nextUp = reviewQueue[1] ?? proposal.sessions.find(
+    (session) =>
+      (!next || new Date(session.start).getTime() > new Date(next.end).getTime()) &&
+      (session.status === "approved" || session.status === "proposed"),
+  );
+  const selectedOutcome = activeSessionId === next?.id ? outcome : null;
+  const selectedMinutes = activeSessionId === next?.id
+    ? minutes
+    : next
+      ? Math.max(1, Math.min(20, next.minutes - 1))
+      : 1;
+  const reviewedToday = sessionReviews.filter(
+    (review) => localDateKey(new Date(review.reviewedAt)) === localDateKey(),
+  ).length;
+  const reviewTotal = reviewedToday + reviewQueue.length;
+
   const submit = () => {
-    if (outcome === "partial") proposeReplan("partial", minutes);
-    if (outcome === "missed") proposeReplan("missed");
+    if (!next || !selectedOutcome) return;
+    reviewSession(next.id, selectedOutcome, selectedOutcome === "partial" ? selectedMinutes : undefined);
+    setOutcome(null);
   };
+
   if (!next) {
     return (
       <>
         <PageHeading
           eyebrow="DAILY REVIEW"
-          title="Nothing needs an outcome."
-          detail="Approved or proposed sessions will appear here when there is work to review."
+          title={replan ? "Your outcome is saved." : "Nothing needs an outcome."}
+          detail={replan
+            ? "Choose whether to add the calculated recovery session. Your recorded outcome will remain either way."
+            : "Approved sessions appear here automatically as soon as their scheduled end time passes."}
         />
-        <EmptyState
-          icon={CheckCircle2}
-          title="Daily review is clear"
-          detail="Create a schedule first, then return here to test completed, partial, missed, and unnecessary outcomes."
-          action={
-            <Link href="/import" className="button button-primary button-md">
-              <Plus size={16} /> Add responsibilities
-            </Link>
-          }
-        />
+        {replan ? <ChangeDiff /> : (
+          <EmptyState
+            icon={CheckCircle2}
+            title="Daily review is clear"
+            detail="Future and unapproved sessions stay out of this queue. Ended approved sessions collect here until you record what happened."
+            action={
+              proposal.sessions.length === 0 ? (
+                <Link href="/import" className="button button-primary button-md">
+                  <Plus size={16} /> Add responsibilities
+                </Link>
+              ) : (
+                <Link href="/schedule" className="button button-primary button-md">
+                  <CalendarDays size={16} /> View schedule
+                </Link>
+              )
+            }
+          />
+        )}
       </>
     );
   }
+
+  const startDate = new Date(next.start);
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "short",
+  }).format(startDate).toUpperCase();
+  const day = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    day: "numeric",
+  }).format(startDate);
+  const progress = reviewTotal > 0 ? (reviewedToday / reviewTotal) * 100 : 0;
+  const invalidPartial =
+    selectedOutcome === "partial" && (selectedMinutes <= 0 || selectedMinutes >= next.minutes);
+
   return (
     <>
       <PageHeading
         eyebrow="DAILY REVIEW"
         title="What actually happened?"
-        detail="Report outcomes honestly. PlanPilot proposes the smallest safe change before anything moves."
+        detail="Record the real outcome. Remaining work is recalculated from this exact session before any recovery block is added."
       />
       <div className="review-progress">
-        <div><span style={{ width: "33%" }} /></div>
-        <p>1 of 3 sessions reviewed</p>
+        <div><span style={{ width: `${progress}%` }} /></div>
+        <p>{reviewedToday} reviewed today · {reviewQueue.length} waiting</p>
       </div>
       <div className="daily-layout">
         <section className="daily-card">
           <div className="daily-card-head">
-            <div className="date-tile large"><span>TUE</span><strong>28</strong></div>
-            <div><Badge tone="warning">Needs an outcome</Badge><h2>Review for chemistry exam</h2><p>6:00–6:45 PM · 45 planned minutes</p></div>
+            <div className="date-tile large"><span>{weekday}</span><strong>{day}</strong></div>
+            <div>
+              <Badge tone="warning">{next.status === "in_progress" ? "Check-in due" : "Needs an outcome"}</Badge>
+              <h2>{next.title}</h2>
+              <p>{formatTime(next.start)}–{formatTime(next.end)} · {next.minutes} planned minutes</p>
+            </div>
           </div>
           <p className="daily-question">How did this session go?</p>
           <div className="outcome-grid">
-            <button className={outcome === "completed" ? "selected success" : ""} onClick={() => setOutcome("completed")}><CheckCircle2 size={20} /><strong>Completed</strong><span>All planned work done</span></button>
-            <button className={outcome === "partial" ? "selected" : ""} onClick={() => setOutcome("partial")}><PanelLeft size={20} /><strong>Partially completed</strong><span>Some effort remains</span></button>
-            <button className={outcome === "missed" ? "selected warning" : ""} onClick={() => setOutcome("missed")}><RotateCcw size={20} /><strong>Missed</strong><span>Move the work forward</span></button>
-            <button className={outcome === "unnecessary" ? "selected" : ""} onClick={() => setOutcome("unnecessary")}><X size={20} /><strong>No longer needed</strong><span>Remove remaining work</span></button>
+            <button className={selectedOutcome === "completed" ? "selected success" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("completed"); }}><CheckCircle2 size={20} /><strong>Completed</strong><span>All planned work done</span></button>
+            <button className={selectedOutcome === "partial" ? "selected" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("partial"); setMinutes(selectedMinutes); }}><PanelLeft size={20} /><strong>Partially completed</strong><span>Some effort remains</span></button>
+            <button className={selectedOutcome === "missed" ? "selected warning" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("missed"); }}><RotateCcw size={20} /><strong>Missed</strong><span>Move the work forward</span></button>
+            <button className={selectedOutcome === "unnecessary" ? "selected" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("unnecessary"); }}><X size={20} /><strong>No longer needed</strong><span>Remove remaining work</span></button>
           </div>
-          {outcome === "partial" && (
+          {selectedOutcome === "partial" && (
             <div className="partial-input">
-              <label>Minutes completed<input type="number" min={0} max={45} value={minutes} onChange={(event) => setMinutes(Number(event.target.value))} /></label>
-              <span><strong>{45 - minutes} min</strong> will remain</span>
+              <label>Minutes completed<input type="number" min={1} max={next.minutes - 1} value={selectedMinutes} onChange={(event) => { setActiveSessionId(next.id); setMinutes(Number(event.target.value)); }} /></label>
+              <span><strong>{Math.max(0, next.minutes - selectedMinutes)} min</strong> will remain</span>
             </div>
           )}
           <div className="daily-actions">
-            <span>Nothing moves until you approve the diff.</span>
-            <Button onClick={submit} disabled={!outcome || outcome === "completed" || outcome === "unnecessary"}>
-              Propose recovery <ArrowRight size={15} />
+            <Button variant="secondary" onClick={() => delaySessionReview(next.id)}>
+              Still working · ask in 15 min
+            </Button>
+            <Button onClick={submit} disabled={!selectedOutcome || invalidPartial}>
+              Save outcome <ArrowRight size={15} />
             </Button>
           </div>
         </section>
         <aside>
           <section className="panel">
             <span className="eyebrow">NEXT UP</span>
-            {next ? (
+            {nextUp ? (
               <>
-                <h3>{next.title}</h3>
-                <p>{formatDay(next.start, true)} · {formatTime(next.start)}</p>
-                <Badge>{next.minutes} minutes</Badge>
+                <h3>{nextUp.title}</h3>
+                <p>{formatDay(nextUp.start, true)} · {formatTime(nextUp.start)}</p>
+                <Badge>{nextUp.minutes} minutes</Badge>
               </>
             ) : <p>No upcoming sessions.</p>}
           </section>

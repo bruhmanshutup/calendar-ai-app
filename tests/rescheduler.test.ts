@@ -59,6 +59,8 @@ describe("minimal-disruption replanning", () => {
     expect(proposal.changes[0].type).toBe("move");
     expect("after" in proposal.changes[0] && proposal.changes[0].after.start)
       .not.toBe(missed.start);
+    expect("after" in proposal.changes[0] && proposal.changes[0].after.taskId)
+      .toBe(missed.taskId);
   });
 
   it("calculates explicit remaining time for partial work", () => {
@@ -101,4 +103,3 @@ describe("minimal-disruption replanning", () => {
     expect(original).toEqual(snapshot);
   });
 });
-
