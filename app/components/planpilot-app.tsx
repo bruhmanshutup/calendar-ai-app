@@ -1527,8 +1527,9 @@ function DailyReviewView() {
   const [outcome, setOutcome] = useState<"completed" | "partial" | "missed" | "unnecessary" | null>(null);
   const [minutes, setMinutes] = useState(20);
   const [activeSessionId, setActiveSessionId] = useState<string>();
-  const next = reviewQueue[0];
-  const nextUp = reviewQueue[1] ?? proposal.sessions.find(
+  const nextCheckIn = reviewQueue[0];
+  const next = nextCheckIn?.session;
+  const nextUp = reviewQueue[1]?.session ?? proposal.sessions.find(
     (session) =>
       (!next || new Date(session.start).getTime() > new Date(next.end).getTime()) &&
       (session.status === "approved" || session.status === "proposed"),
@@ -1543,6 +1544,8 @@ function DailyReviewView() {
     (review) => localDateKey(new Date(review.reviewedAt)) === localDateKey(),
   ).length;
   const reviewTotal = reviewedToday + reviewQueue.length;
+  const activeCount = reviewQueue.filter((item) => item.phase === "in_progress").length;
+  const needsReviewCount = reviewQueue.length - activeCount;
 
   const submit = () => {
     if (!next || !selectedOutcome) return;
@@ -1558,13 +1561,13 @@ function DailyReviewView() {
           title={replan ? "Your outcome is saved." : "Nothing needs an outcome."}
           detail={replan
             ? "Choose whether to add the calculated recovery session. Your recorded outcome will remain either way."
-            : "Approved sessions appear here automatically as soon as their scheduled end time passes."}
+            : "Approved sessions appear here as soon as their scheduled start time arrives."}
         />
         {replan ? <ChangeDiff /> : (
           <EmptyState
             icon={CheckCircle2}
             title="Daily review is clear"
-            detail="Future and unapproved sessions stay out of this queue. Ended approved sessions collect here until you record what happened."
+            detail="Future and unapproved sessions stay out of this queue. An approved session becomes actionable at its start time and remains here until you record an outcome."
             action={
               proposal.sessions.length === 0 ? (
                 <Link href="/import" className="button button-primary button-md">
@@ -1599,28 +1602,32 @@ function DailyReviewView() {
     <>
       <PageHeading
         eyebrow="DAILY REVIEW"
-        title="What actually happened?"
-        detail="Record the real outcome. Remaining work is recalculated from this exact session before any recovery block is added."
+        title={nextCheckIn.phase === "in_progress" ? "Working on this now?" : "What actually happened?"}
+        detail={nextCheckIn.phase === "in_progress"
+          ? "Finish early whenever the planned work is done, or record partial progress. Missed becomes available after the session ends."
+          : "Record the real outcome. Remaining work is recalculated from this exact session before any recovery block is added."}
       />
       <div className="review-progress">
         <div><span style={{ width: `${progress}%` }} /></div>
-        <p>{reviewedToday} reviewed today · {reviewQueue.length} waiting</p>
+        <p>{reviewedToday} reviewed today · {activeCount} active · {needsReviewCount} need review</p>
       </div>
       <div className="daily-layout">
         <section className="daily-card">
           <div className="daily-card-head">
             <div className="date-tile large"><span>{weekday}</span><strong>{day}</strong></div>
             <div>
-              <Badge tone="warning">{next.status === "in_progress" ? "Check-in due" : "Needs an outcome"}</Badge>
+              <Badge tone={nextCheckIn.phase === "in_progress" ? "info" : "warning"}>
+                {nextCheckIn.phase === "in_progress" ? "In progress now" : next.status === "in_progress" ? "Check-in due" : "Needs review"}
+              </Badge>
               <h2>{next.title}</h2>
               <p>{formatTime(next.start)}–{formatTime(next.end)} · {next.minutes} planned minutes</p>
             </div>
           </div>
-          <p className="daily-question">How did this session go?</p>
+          <p className="daily-question">{nextCheckIn.phase === "in_progress" ? "How is this session going?" : "How did this session go?"}</p>
           <div className="outcome-grid">
-            <button className={selectedOutcome === "completed" ? "selected success" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("completed"); }}><CheckCircle2 size={20} /><strong>Completed</strong><span>All planned work done</span></button>
+            <button className={selectedOutcome === "completed" ? "selected success" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("completed"); }}><CheckCircle2 size={20} /><strong>{nextCheckIn.phase === "in_progress" ? "Finish early" : "Completed"}</strong><span>All planned work done</span></button>
             <button className={selectedOutcome === "partial" ? "selected" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("partial"); setMinutes(selectedMinutes); }}><PanelLeft size={20} /><strong>Partially completed</strong><span>Some effort remains</span></button>
-            <button className={selectedOutcome === "missed" ? "selected warning" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("missed"); }}><RotateCcw size={20} /><strong>Missed</strong><span>Move the work forward</span></button>
+            <button disabled={nextCheckIn.phase === "in_progress"} className={selectedOutcome === "missed" ? "selected warning" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("missed"); }}><RotateCcw size={20} /><strong>Missed</strong><span>{nextCheckIn.phase === "in_progress" ? "Available after session end" : "Move the work forward"}</span></button>
             <button className={selectedOutcome === "unnecessary" ? "selected" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("unnecessary"); }}><X size={20} /><strong>No longer needed</strong><span>Remove remaining work</span></button>
           </div>
           {selectedOutcome === "partial" && (

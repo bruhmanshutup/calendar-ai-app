@@ -4,19 +4,52 @@ import type {
   SessionReview,
 } from "./types";
 
-export function pendingSessionReviews(
+export type SessionCheckInPhase = "in_progress" | "needs_review";
+
+export type SessionCheckIn = {
+  session: PlannedSession;
+  phase: SessionCheckInPhase;
+};
+
+export function sessionCheckIns(
   sessions: PlannedSession[],
   now: number,
-): PlannedSession[] {
+): SessionCheckIn[] {
   return sessions
     .filter((session) => {
       if (session.status !== "approved" && session.status !== "in_progress") {
         return false;
       }
-      const reviewAt = new Date(session.reviewAfter ?? session.end).getTime();
-      return Number.isFinite(reviewAt) && reviewAt <= now;
+      const start = new Date(session.start).getTime();
+      const reviewAfter = session.reviewAfter
+        ? new Date(session.reviewAfter).getTime()
+        : undefined;
+      return (
+        Number.isFinite(start) &&
+        start <= now &&
+        (reviewAfter === undefined || reviewAfter <= now)
+      );
     })
-    .sort((a, b) => new Date(a.end).getTime() - new Date(b.end).getTime());
+    .map((session) => ({
+      session,
+      phase: new Date(session.end).getTime() <= now
+        ? "needs_review" as const
+        : "in_progress" as const,
+    }))
+    .sort((a, b) => {
+      if (a.phase !== b.phase) return a.phase === "in_progress" ? -1 : 1;
+      if (a.phase === "in_progress") {
+        return new Date(b.session.start).getTime() - new Date(a.session.start).getTime();
+      }
+      return new Date(a.session.end).getTime() - new Date(b.session.end).getTime();
+    });
+}
+
+export function canRecordSessionOutcome(
+  checkIn: SessionCheckIn,
+  outcome: SessionOutcome,
+): boolean {
+  return outcome !== "missed" || checkIn.phase === "needs_review";
 }
 
 export function createSessionReview(

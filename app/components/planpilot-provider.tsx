@@ -14,8 +14,10 @@ import { DEFAULT_PREFERENCES } from "@/lib/defaults";
 import { generateSchedule } from "@/lib/domain/scheduler";
 import { proposeMinimalReplan } from "@/lib/domain/rescheduler";
 import {
+  canRecordSessionOutcome,
   createSessionReview,
-  pendingSessionReviews,
+  sessionCheckIns,
+  type SessionCheckIn,
 } from "@/lib/domain/session-review";
 import { parsePersistedWorkspace } from "@/lib/domain/workspace-state";
 import type {
@@ -58,7 +60,7 @@ type PlanPilotContextValue = {
   exportState: "idle" | "loading" | "success" | "error";
   replan?: ReplanProposal;
   applyReplan: () => void;
-  reviewQueue: PlannedSession[];
+  reviewQueue: SessionCheckIn[];
   sessionReviews: SessionReview[];
   reviewSession: (
     sessionId: string,
@@ -192,9 +194,19 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
+    const current = Date.now();
+    const nextBoundary = proposal.sessions
+      .flatMap((session) => [session.start, session.end, session.reviewAfter])
+      .filter((value): value is string => !!value)
+      .map((value) => new Date(value).getTime())
+      .filter((value) => Number.isFinite(value) && value > current)
+      .sort((a, b) => a - b)[0];
+    const delay = nextBoundary
+      ? Math.max(50, Math.min(30_000, nextBoundary - current + 25))
+      : 30_000;
+    const timer = window.setTimeout(() => setNow(Date.now()), delay);
+    return () => window.clearTimeout(timer);
+  }, [now, proposal.sessions]);
 
   useEffect(() => {
     let active = true;
@@ -266,7 +278,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
   ]);
 
   const reviewQueue = useMemo(
-    () => pendingSessionReviews(proposal.sessions, now),
+    () => sessionCheckIns(proposal.sessions, now),
     [now, proposal.sessions],
   );
 
@@ -520,9 +532,14 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       outcome: SessionOutcome,
       minutesCompleted?: number,
     ) => {
-      const session = proposal.sessions.find((item) => item.id === sessionId);
-      if (!session || !reviewQueue.some((item) => item.id === sessionId)) {
-        setToast("That session is not ready for review.");
+      const checkIn = reviewQueue.find((item) => item.session.id === sessionId);
+      const session = checkIn?.session;
+      if (!session || !checkIn) {
+        setToast("That session is not ready for a check-in.");
+        return;
+      }
+      if (!canRecordSessionOutcome(checkIn, outcome)) {
+        setToast("A session can only be marked missed after its scheduled end time.");
         return;
       }
       const task = tasks.find((item) => item.id === session.taskId);
