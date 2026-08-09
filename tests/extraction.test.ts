@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { extractionResultSchema } from "../lib/domain/extraction-schema";
 import { MockTaskExtractionProvider } from "../lib/providers/mock-extraction";
+import { recoverExplicitOverdueTasks } from "../lib/providers/overdue-recovery";
 import { TaskExtractionError } from "../lib/providers/task-extraction";
 import { extractWithRepair } from "../lib/providers/validated-extraction";
 import { task } from "./fixtures";
@@ -139,6 +140,53 @@ describe("extraction validation and mock interpretation", () => {
     expect(result.tasks[0].title).toBe("submit timesheet");
     expect(result.ignoredStatements).toHaveLength(1);
     expect(result.ignoredStatements[0].sourceText).toContain("office closed");
+  });
+
+  it("extracts Northwestern-style overdue checklist items as urgent tasks", async () => {
+    const overdueInput = {
+      currentLocalDate: "2026-08-09",
+      timeZone: "America/Los_Angeles",
+      text: [
+        "Review weeks 1-4 of Before the Arch content (optional) 8/03/26(OVERDUE)",
+        "Read your early-August Purple Prep email 8/04/26(OVERDUE)",
+        "Add parent/guardian authorized payer to your student account on CAESAR (optional) 8/08/26(OVERDUE)",
+      ].join("\n"),
+    };
+    const result = await new MockTaskExtractionProvider().extractTasks(overdueInput);
+
+    expect(result.tasks).toHaveLength(3);
+    expect(result.tasks.map((task) => task.dueDate)).toEqual([
+      "2026-08-03",
+      "2026-08-04",
+      "2026-08-08",
+    ]);
+    expect(result.tasks.every((task) => task.priority === "urgent")).toBe(true);
+    expect(result.tasks.every((task) => !/overdue/i.test(task.title))).toBe(true);
+  });
+
+  it("recovers a concrete overdue line when an AI provider incorrectly ignores it", async () => {
+    const overdueLine = "Read your early-August Purple Prep email 8/04/26(OVERDUE)";
+    const result = await recoverExplicitOverdueTasks(
+      {
+        currentLocalDate: "2026-08-09",
+        timeZone: "America/Los_Angeles",
+        text: overdueLine,
+      },
+      {
+        tasks: [],
+        ignoredStatements: [
+          { sourceText: overdueLine, reason: "Status update." },
+        ],
+      },
+    );
+
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      title: "Read your early-August Purple Prep email",
+      dueDate: "2026-08-04",
+      priority: "urgent",
+    });
+    expect(result.ignoredStatements).toHaveLength(0);
   });
 
   it("ignores standalone dates and random words", async () => {

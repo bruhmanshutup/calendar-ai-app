@@ -8,6 +8,7 @@ Non-negotiable rules:
 - Preserve the exact relevant source text.
 - Separate flexible work, fixed-time events, finite recurring goals, and ignored informational statements.
 - Do not turn every line into a task. Ignore headings, greetings, signatures, email headers, standalone links or dates, random fragments, status updates, and background text with no concrete user action.
+- Status labels appended to a concrete responsibility do not make it a status-only line. In particular, extract actionable dated lines ending in "(OVERDUE)" or "OVERDUE", keep their original past due date, set priority to urgent, and omit the status label from the task title. For example, "Read orientation email 8/04/26 (OVERDUE)" is a task; a standalone "OVERDUE" label is ignored.
 - A reminder, note, or FYI is a task only when it contains a concrete action for the user. "Reminder: submit timesheet Friday" is a task; "Reminder: office closed Friday" is ignored.
 - "Chemistry exam — Aug 15" is a dated responsibility. "FYI: library entrance moved" is ignored.
 - A date without a time must keep dueTime absent.

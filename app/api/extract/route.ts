@@ -3,6 +3,7 @@ import { z } from "zod";
 import { MockTaskExtractionProvider } from "@/lib/providers/mock-extraction";
 import { GeminiTaskExtractionProvider } from "@/lib/providers/gemini-extraction";
 import { OpenAITaskExtractionProvider } from "@/lib/providers/openai-extraction";
+import { recoverExplicitOverdueTasks } from "@/lib/providers/overdue-recovery";
 import {
   TaskExtractionError,
   type TaskExtractionProvider,
@@ -50,7 +51,8 @@ export async function POST(request: Request): Promise<Response> {
   }
   try {
     const selected = provider();
-    const result = await selected.extractor.extractTasks(parsed.data);
+    const extracted = await selected.extractor.extractTasks(parsed.data);
+    const result = await recoverExplicitOverdueTasks(parsed.data, extracted);
     return NextResponse.json({ ...result, extractionMode: selected.mode });
   } catch (error) {
     const typed =

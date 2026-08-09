@@ -102,6 +102,7 @@ function titleFor(text: string, datePhrase?: string): string {
     .replace(/^\s*(?:[-*•]|\d+[.)]|\[[ x]\])\s*/i, "")
     .replace(/^(?:task|to-?do|action item|reminder)\s*:\s*/i, "")
     .replace(datePhrase ?? /$^/, " ")
+    .replace(/\s*\(\s*overdue\s*\)\s*/gi, " ")
     .replace(/\b(?:by|before|on|due(?:\s+on)?)\s*$/i, "")
     .replace(/\b(?:for\s+)?\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?)(?:\s+each)?\b/gi, " ")
     .replace(/\s+/g, " ")
