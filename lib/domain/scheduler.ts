@@ -352,6 +352,18 @@ function findCandidate(
         end: end + breakMinutes * MINUTE,
       };
       if (
+        task.taskType === "recurring_goal" &&
+        taskSessions.some(
+          (session) =>
+            localParts(
+              new Date(session.start).getTime(),
+              input.preferences.timeZone,
+            ).date === local.date,
+        )
+      ) {
+        continue;
+      }
+      if (
         !input.preferences.weekendsAllowed &&
         (local.weekday === "saturday" || local.weekday === "sunday")
       ) {

@@ -226,6 +226,41 @@ describe("deterministic scheduling", () => {
     expect(dates.size).toBe(3);
   });
 
+  it("never places the same recurring goal twice on one day", () => {
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "daily-limit",
+            title: "Go to the gym",
+            taskType: "recurring_goal",
+            category: "fitness",
+            estimatedMinutes: 45,
+            recurrence: {
+              frequency: "weekly",
+              count: 3,
+              windowEnd: "2026-07-28T20:00:00.000Z",
+            },
+          }),
+        ],
+        {
+          availability: [
+            { start: "2026-07-27T17:00:00.000Z", end: "2026-07-27T20:00:00.000Z" },
+            { start: "2026-07-28T17:00:00.000Z", end: "2026-07-28T20:00:00.000Z" },
+          ],
+        },
+      ),
+    );
+    const sessions = proposal.sessions.filter(
+      (session) => session.taskId === "daily-limit",
+    );
+    const dates = sessions.map((session) => session.start.slice(0, 10));
+
+    expect(sessions).toHaveLength(2);
+    expect(new Set(dates).size).toBe(sessions.length);
+    expect(proposal.unschedulable[0]?.unscheduledMinutes).toBe(45);
+  });
+
   it("retains the configured buffer", () => {
     const proposal = generateSchedule(
       scheduling(

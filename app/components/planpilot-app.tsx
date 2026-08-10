@@ -8,7 +8,9 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleHelp,
   Clock3,
   Cloud,
@@ -217,21 +219,46 @@ export function FieldConfidenceIndicator({
 export function ScheduleReason({
   reasons,
   explanation,
+  expanded,
+  onExpandedChange,
 }: {
   reasons: ScheduleReasonCode[];
   explanation: string;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const isExpanded = expanded ?? localExpanded;
+  const toggle = () => {
+    const next = !isExpanded;
+    if (onExpandedChange) onExpandedChange(next);
+    else setLocalExpanded(next);
+  };
   return (
     <div className="reason-block">
-      <div className="reason-tags">
-        {reasons.slice(0, 3).map((reason) => (
-          <span key={reason}>
-            <Sparkles size={12} aria-hidden="true" />
-            {REASON_LABELS[reason]}
-          </span>
-        ))}
-      </div>
-      <p>{explanation}</p>
+      <button
+        type="button"
+        className="reason-toggle"
+        aria-expanded={isExpanded}
+        onClick={toggle}
+      >
+        <Sparkles size={12} aria-hidden="true" />
+        Why this time?
+        {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+      </button>
+      {isExpanded && (
+        <div className="reason-details">
+          <div className="reason-tags">
+            {reasons.slice(0, 3).map((reason) => (
+              <span key={reason}>
+                <Sparkles size={12} aria-hidden="true" />
+                {REASON_LABELS[reason]}
+              </span>
+            ))}
+          </div>
+          <p>{explanation}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1268,9 +1295,13 @@ export function UnschedulableTaskCard({ task }: { task: UnschedulableTask }) {
 export function ScheduleSessionCard({
   session,
   selectable = true,
+  reasonExpanded,
+  onReasonExpandedChange,
 }: {
   session: PlannedSession;
   selectable?: boolean;
+  reasonExpanded?: boolean;
+  onReasonExpandedChange?: (expanded: boolean) => void;
 }) {
   const {
     toggleSessionLock,
@@ -1312,7 +1343,12 @@ export function ScheduleSessionCard({
         </button>
       </div>
       <h3>{session.title}</h3>
-      <ScheduleReason reasons={session.reasonCodes} explanation={session.explanation} />
+      <ScheduleReason
+        reasons={session.reasonCodes}
+        explanation={session.explanation}
+        expanded={reasonExpanded}
+        onExpandedChange={onReasonExpandedChange}
+      />
       <div className="session-actions">
         {session.status === "proposed" ? (
           <button onClick={() => approveSession(session.id)}><Check size={13} /> Approve</button>
@@ -1359,8 +1395,25 @@ function ScheduleView() {
     requestAnotherTime,
   } = usePlanPilot();
   const [mode, setMode] = useState<"week" | "list">("week");
-  const [showReasons, setShowReasons] = useState(true);
+  const [expandedReasonIds, setExpandedReasonIds] = useState<string[]>([]);
   const weekColumns = scheduleColumns(proposal.sessions);
+  const allReasonsExpanded =
+    proposal.sessions.length > 0 &&
+    proposal.sessions.every((session) => expandedReasonIds.includes(session.id));
+  const toggleAllReasons = () => {
+    setExpandedReasonIds(
+      allReasonsExpanded ? [] : proposal.sessions.map((session) => session.id),
+    );
+  };
+  const setReasonExpanded = (sessionId: string, expanded: boolean) => {
+    setExpandedReasonIds((current) =>
+      expanded
+        ? current.includes(sessionId)
+          ? current
+          : [...current, sessionId]
+        : current.filter((id) => id !== sessionId),
+    );
+  };
   const approveSelected = () => selectedSessionIds.forEach(approveSession);
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1409,15 +1462,20 @@ function ScheduleView() {
           <button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}><CalendarDays size={15} /> Timeline</button>
           <button className={mode === "list" ? "active" : ""} onClick={() => setMode("list")}><LayoutList size={15} /> Task list</button>
         </div>
-        <label className="inline-check">
-          <input type="checkbox" checked={showReasons} onChange={(event) => setShowReasons(event.target.checked)} />
-          Show planning reasons
-        </label>
+        <button
+          type="button"
+          className="reasoning-all-button"
+          onClick={toggleAllReasons}
+          aria-label={`${allReasonsExpanded ? "Collapse" : "Expand"} all scheduling reasoning and explanations`}
+        >
+          {allReasonsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {allReasonsExpanded ? "Collapse all" : "Expand all"}
+        </button>
         <span className="schedule-range">{weekColumns[0].range} – {weekColumns.at(-1)?.range}</span>
       </div>
       {mode === "week" ? (
         <div
-          className={`week-board ${showReasons ? "" : "hide-reasons"}`}
+          className="week-board"
           style={{ gridTemplateColumns: `repeat(${weekColumns.length}, minmax(180px, 1fr))` }}
         >
           {weekColumns.map((day) => {
@@ -1440,7 +1498,13 @@ function ScheduleView() {
                 <div className="day-sessions">
                   {sessions.map((session) => (
                     <div key={session.id} onDragStart={(event) => event.dataTransfer.setData("text/plain", session.id)}>
-                      <ScheduleSessionCard session={session} />
+                      <ScheduleSessionCard
+                        session={session}
+                        reasonExpanded={expandedReasonIds.includes(session.id)}
+                        onReasonExpandedChange={(expanded) =>
+                          setReasonExpanded(session.id, expanded)
+                        }
+                      />
                     </div>
                   ))}
                   {sessions.length === 0 && <span className="open-day">Open capacity</span>}
@@ -1450,11 +1514,17 @@ function ScheduleView() {
           })}
         </div>
       ) : (
-        <div className={`schedule-list-view ${showReasons ? "" : "hide-reasons"}`}>
+        <div className="schedule-list-view">
           {proposal.sessions.map((session) => (
             <div key={session.id}>
               <span className="list-day">{formatDay(session.start, true)}</span>
-              <ScheduleSessionCard session={session} />
+              <ScheduleSessionCard
+                session={session}
+                reasonExpanded={expandedReasonIds.includes(session.id)}
+                onReasonExpandedChange={(expanded) =>
+                  setReasonExpanded(session.id, expanded)
+                }
+              />
             </div>
           ))}
         </div>
