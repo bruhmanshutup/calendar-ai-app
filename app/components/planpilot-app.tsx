@@ -50,12 +50,18 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  DayOfWeek,
   ExtractedTask,
   PlannedSession,
   PlanningMode,
   ScheduleReasonCode,
   UnschedulableTask,
 } from "@/lib/domain/types";
+import {
+  DAYS_OF_WEEK,
+  groupRecurrenceDayTimes,
+  recurrenceTimeForDay,
+} from "@/lib/domain/recurrence";
 import { usePlanPilot } from "./planpilot-provider";
 
 export type PlanPilotView =
@@ -151,6 +157,59 @@ function shortDate(value?: string): string {
     month: "short",
     day: "numeric",
   }).format(new Date(`${value}T12:00:00Z`));
+}
+
+const SHORT_DAY_LABELS: Record<DayOfWeek, string> = {
+  monday: "Mon",
+  tuesday: "Tue",
+  wednesday: "Wed",
+  thursday: "Thu",
+  friday: "Fri",
+  saturday: "Sat",
+  sunday: "Sun",
+};
+
+function formatClockTime(value: string): string {
+  const [hour, minute] = value.split(":").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(Date.UTC(2026, 0, 1, hour, minute)));
+}
+
+function formatRecurringDays(days: DayOfWeek[]): string {
+  if (days.length === 7) return "Daily";
+  if (
+    days.length === 5 &&
+    DAYS_OF_WEEK.slice(0, 5).every((day) => days.includes(day))
+  ) {
+    return "Weekdays";
+  }
+  if (
+    days.length === 2 &&
+    DAYS_OF_WEEK.slice(5).every((day) => days.includes(day))
+  ) {
+    return "Weekends";
+  }
+  return days.map((day) => SHORT_DAY_LABELS[day]).join(", ");
+}
+
+function recurrenceSummary(task: ExtractedTask): string {
+  const recurrence = task.recurrence;
+  if (!recurrence) return "Not configured";
+  if (recurrence.mode === "fixed_times") {
+    return (
+      recurrence.timeRules
+        ?.map(
+          (rule) =>
+            `${formatRecurringDays(rule.daysOfWeek)} at ${formatClockTime(rule.time)}`,
+        )
+        .join(" · ") ?? "Times need review"
+    );
+  }
+  const count = recurrence.count ?? 1;
+  return `${count} time${count === 1 ? "" : "s"} ${recurrence.frequency}`;
 }
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -1033,16 +1092,16 @@ function ImportView() {
             <span><Info size={17} /></span>
             <div>
               <strong>Good input can still be messy</strong>
-              <p>Include deadlines, rough effort, recurring counts, and fixed appointments when you know them. It is fine to leave things out.</p>
+              <p>Include deadlines, rough effort, recurring counts, fixed appointments, and day-specific routine times when you know them. It is fine to leave things out.</p>
             </div>
           </section>
           <section className="panel example-card">
             <span className="eyebrow">EXAMPLE</span>
-            <p>“Finish the essay soon. Doctor appointment Tuesday at 3 PM. Gym four times this week.”</p>
+            <p>“Take medication every day at 8 AM, but Tuesdays and Thursdays at 10 AM.”</p>
             <div>
-              <span><AlertTriangle size={14} /> Essay stays without a deadline</span>
-              <span><CalendarDays size={14} /> Appointment becomes a fixed event</span>
-              <span><Target size={14} /> Gym becomes a four-session quota</span>
+              <span><Target size={14} /> One recurring routine is created</span>
+              <span><Clock3 size={14} /> Tuesday and Thursday keep the 10 AM exception</span>
+              <span><CalendarDays size={14} /> Other days stay at 8 AM</span>
             </div>
           </section>
         </aside>
@@ -1073,6 +1132,29 @@ function ImportView() {
 export function TaskReviewCard({ task }: { task: ExtractedTask }) {
   const { updateTask, approveTask, deleteTask } = usePlanPilot();
   const [expanded, setExpanded] = useState(task.reviewRequired ?? false);
+  const updateRecurringTime = (day: DayOfWeek, time: string) => {
+    if (task.recurrence?.mode !== "fixed_times") return;
+    const times = Object.fromEntries(
+      DAYS_OF_WEEK.map((item) => [
+        item,
+        recurrenceTimeForDay(task.recurrence, item),
+      ]),
+    ) as Partial<Record<DayOfWeek, string>>;
+    if (time) {
+      times[day] = time;
+    } else {
+      delete times[day];
+    }
+    const timeRules = groupRecurrenceDayTimes(times);
+    if (timeRules.length === 0) return;
+    updateTask(task.id ?? "", {
+      recurrence: {
+        ...task.recurrence,
+        daysOfWeek: DAYS_OF_WEEK.filter((item) => Boolean(times[item])),
+        timeRules,
+      },
+    });
+  };
   return (
     <article className={`task-review-card ${task.reviewRequired ? "needs-review" : ""}`}>
       <div className="task-card-top">
@@ -1106,11 +1188,19 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
         <p>“{task.sourceText}”</p>
       </div>
       <div className="task-field-summary">
-        <div>
-          <span>Deadline</span>
-          <strong>{task.dueDate ? `${shortDate(task.dueDate)}${task.dueTime ? ` at ${task.dueTime}` : " · time not specified"}` : "Not specified"}</strong>
-          <FieldConfidenceIndicator label="Deadline" confidence={task.fieldConfidence.dueDate} />
-        </div>
+        {task.recurrence?.mode === "fixed_times" ? (
+          <div>
+            <span>Recurring schedule</span>
+            <strong>{recurrenceSummary(task)}</strong>
+            <FieldConfidenceIndicator label="Recurrence" confidence={task.fieldConfidence.recurrence} />
+          </div>
+        ) : (
+          <div>
+            <span>Deadline</span>
+            <strong>{task.dueDate ? `${shortDate(task.dueDate)}${task.dueTime ? ` at ${task.dueTime}` : " · time not specified"}` : "Not specified"}</strong>
+            <FieldConfidenceIndicator label="Deadline" confidence={task.fieldConfidence.dueDate} />
+          </div>
+        )}
         <div>
           <span>Effort</span>
           <strong>{task.estimatedMinutes ? `${task.estimatedMinutes} minutes` : "Not estimated"}</strong>
@@ -1151,12 +1241,44 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
         <div className="task-edit-grid">
           <label>
             Task type
-            <select value={task.taskType} onChange={(event) => updateTask(task.id ?? "", { taskType: event.target.value as ExtractedTask["taskType"] })}>
+            <select
+              value={task.taskType}
+              onChange={(event) => {
+                const taskType = event.target.value as ExtractedTask["taskType"];
+                updateTask(task.id ?? "", {
+                  taskType,
+                  recurrence:
+                    taskType === "recurring_goal" ? task.recurrence : undefined,
+                });
+              }}
+            >
               <option value="flexible">Flexible work</option>
               <option value="fixed_time">Fixed-time event</option>
-              <option value="recurring_goal">Recurring quota</option>
+              <option value="recurring_goal">Recurring routine or quota</option>
             </select>
           </label>
+          {task.taskType === "recurring_goal" && task.recurrence?.mode !== "fixed_times" && (
+            <label>
+              Occurrences
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={task.recurrence?.count ?? 1}
+                onChange={(event) =>
+                  updateTask(task.id ?? "", {
+                    recurrence: {
+                      frequency: task.recurrence?.frequency ?? "weekly",
+                      ...task.recurrence,
+                      mode: "quota",
+                      count: Number(event.target.value) || 1,
+                      timeRules: undefined,
+                    },
+                  })
+                }
+              />
+            </label>
+          )}
           <label>
             Due date
             <input type="date" value={task.dueDate ?? ""} onChange={(event) => updateTask(task.id ?? "", { dueDate: event.target.value || undefined })} />
@@ -1191,6 +1313,27 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
             <input type="checkbox" checked={task.splittable} onChange={(event) => updateTask(task.id ?? "", { splittable: event.target.checked })} />
             May be split into sessions
           </label>
+          {task.recurrence?.mode === "fixed_times" && (
+            <fieldset className="recurrence-time-editor">
+              <legend>Fixed recurring times</legend>
+              <p>Each occurrence stays at its stated time. Change individual days to create or adjust an exception.</p>
+              <div>
+                {DAYS_OF_WEEK.map((day) => (
+                  <label key={day}>
+                    {SHORT_DAY_LABELS[day]}
+                    <input
+                      type="time"
+                      value={recurrenceTimeForDay(task.recurrence, day) ?? ""}
+                      aria-label={`${day} recurring time`}
+                      onChange={(event) =>
+                        updateRecurringTime(day, event.target.value)
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
         </div>
       )}
       <div className="task-card-actions">

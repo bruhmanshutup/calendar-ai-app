@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { extractionResultSchema } from "../lib/domain/extraction-schema";
 import { MockTaskExtractionProvider } from "../lib/providers/mock-extraction";
 import { recoverExplicitOverdueTasks } from "../lib/providers/overdue-recovery";
+import { recoverTimedRecurrences } from "../lib/providers/recurrence-recovery";
 import { TaskExtractionError } from "../lib/providers/task-extraction";
 import { extractWithRepair } from "../lib/providers/validated-extraction";
 import { task } from "./fixtures";
@@ -206,6 +207,74 @@ describe("extraction validation and mock interpretation", () => {
     expect(result.tasks[0].taskType).toBe("recurring_goal");
     expect(result.tasks[0].recurrence?.count).toBe(4);
     expect(result.tasks[0].estimatedMinutes).toBe(45);
+  });
+
+  it("keeps a split daily recurrence as one timed routine", async () => {
+    const source =
+      "Take medication every day at 8 AM, but Tuesdays and Thursdays at 10 AM.";
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: source,
+    });
+
+    expect(result.tasks).toHaveLength(1);
+    expect(result.ignoredStatements).toHaveLength(0);
+    expect(result.tasks[0]).toMatchObject({
+      title: "Take medication",
+      taskType: "recurring_goal",
+      dueDate: undefined,
+      recurrence: {
+        frequency: "daily",
+        mode: "fixed_times",
+        timeRules: [
+          {
+            daysOfWeek: [
+              "monday",
+              "wednesday",
+              "friday",
+              "saturday",
+              "sunday",
+            ],
+            time: "08:00",
+          },
+          { daysOfWeek: ["tuesday", "thursday"], time: "10:00" },
+        ],
+      },
+    });
+  });
+
+  it("recovers an explicit split recurrence when an AI provider ignores it", async () => {
+    const source =
+      "Practice piano every day at 6 PM, except weekends at 10 AM.";
+    const result = await recoverTimedRecurrences(
+      { ...input, text: source },
+      {
+        tasks: [],
+        ignoredStatements: [{ sourceText: source, reason: "Extra wording." }],
+      },
+    );
+
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      title: "Practice piano",
+      recurrence: {
+        mode: "fixed_times",
+        timeRules: [
+          {
+            daysOfWeek: [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday",
+            ],
+            time: "18:00",
+          },
+          { daysOfWeek: ["saturday", "sunday"], time: "10:00" },
+        ],
+      },
+    });
+    expect(result.ignoredStatements).toHaveLength(0);
   });
 
   it("rejects invalid structured output", () => {

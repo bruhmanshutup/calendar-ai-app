@@ -76,6 +76,12 @@ export const GEMINI_EXTRACTION_SCHEMA = {
             type: "object",
             properties: {
               frequency: { type: "string", enum: ["daily", "weekly"] },
+              mode: {
+                type: "string",
+                enum: ["quota", "fixed_times"],
+                description:
+                  "quota is a flexible occurrence count; fixed_times is a recurring schedule with exact per-day times.",
+              },
               count: { type: "integer", minimum: 1, maximum: 31 },
               daysOfWeek: {
                 type: "array",
@@ -91,6 +97,41 @@ export const GEMINI_EXTRACTION_SCHEMA = {
                     "saturday",
                     "sunday",
                   ],
+                },
+              },
+              timeRules: {
+                type: "array",
+                minItems: 1,
+                maxItems: 7,
+                description:
+                  "Grouped local times for a fixed_times recurrence. A day must appear in at most one rule.",
+                items: {
+                  type: "object",
+                  properties: {
+                    daysOfWeek: {
+                      type: "array",
+                      minItems: 1,
+                      maxItems: 7,
+                      items: {
+                        type: "string",
+                        enum: [
+                          "monday",
+                          "tuesday",
+                          "wednesday",
+                          "thursday",
+                          "friday",
+                          "saturday",
+                          "sunday",
+                        ],
+                      },
+                    },
+                    time: {
+                      type: "string",
+                      pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                      description: "Local time in HH:mm format.",
+                    },
+                  },
+                  required: ["daysOfWeek", "time"],
                 },
               },
               windowStart: { type: "string", format: "date-time" },

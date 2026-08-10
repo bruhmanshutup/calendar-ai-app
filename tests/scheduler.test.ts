@@ -261,6 +261,77 @@ describe("deterministic scheduling", () => {
     expect(proposal.unschedulable[0]?.unscheduledMinutes).toBe(45);
   });
 
+  it("expands a split daily recurrence at its exact per-day times", () => {
+    const availability = [
+      "2026-07-27",
+      "2026-07-28",
+      "2026-07-29",
+      "2026-07-30",
+      "2026-07-31",
+      "2026-08-01",
+    ].map((date) => ({
+      start: `${date}T07:00:00.000Z`,
+      end: `${date}T14:00:00.000Z`,
+    }));
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "split-routine",
+            title: "Take medication",
+            taskType: "recurring_goal",
+            estimatedMinutes: 30,
+            recurrence: {
+              frequency: "daily",
+              mode: "fixed_times",
+              daysOfWeek: [
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday",
+              ],
+              timeRules: [
+                {
+                  daysOfWeek: [
+                    "monday",
+                    "wednesday",
+                    "friday",
+                    "saturday",
+                    "sunday",
+                  ],
+                  time: "09:00",
+                },
+                {
+                  daysOfWeek: ["tuesday", "thursday"],
+                  time: "11:00",
+                },
+              ],
+            },
+          }),
+        ],
+        { availability },
+      ),
+    );
+    const sessions = proposal.sessions.filter(
+      (session) => session.taskId === "split-routine",
+    );
+
+    expect(sessions.map((session) => session.start)).toEqual([
+      "2026-07-27T09:00:00.000Z",
+      "2026-07-28T11:00:00.000Z",
+      "2026-07-29T09:00:00.000Z",
+      "2026-07-30T11:00:00.000Z",
+      "2026-07-31T09:00:00.000Z",
+      "2026-08-01T09:00:00.000Z",
+    ]);
+    expect(sessions.every((session) => session.locked)).toBe(true);
+    expect(sessions.every((session) => session.reasonCodes.includes("FIXED_TIME"))).toBe(true);
+    expect(proposal.unschedulable).toHaveLength(0);
+  });
+
   it("retains the configured buffer", () => {
     const proposal = generateSchedule(
       scheduling(

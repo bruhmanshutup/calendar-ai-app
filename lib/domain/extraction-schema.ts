@@ -42,10 +42,50 @@ export const extractedTaskSchema = z
     recurrence: z
       .object({
         frequency: z.enum(["daily", "weekly"]),
+        mode: z.enum(["quota", "fixed_times"]).optional(),
         count: z.number().int().positive().max(31).optional(),
         daysOfWeek: z.array(dayOfWeekSchema).max(7).optional(),
+        timeRules: z
+          .array(
+            z.object({
+              daysOfWeek: z.array(dayOfWeekSchema).min(1).max(7),
+              time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+            }),
+          )
+          .min(1)
+          .max(7)
+          .optional(),
         windowStart: z.string().datetime({ offset: true }).optional(),
         windowEnd: z.string().datetime({ offset: true }).optional(),
+      })
+      .superRefine((recurrence, context) => {
+        if (recurrence.mode === "fixed_times" && !recurrence.timeRules?.length) {
+          context.addIssue({
+            code: "custom",
+            path: ["timeRules"],
+            message: "A fixed recurring schedule requires at least one day and time rule.",
+          });
+        }
+        if (recurrence.mode !== "fixed_times" && recurrence.timeRules?.length) {
+          context.addIssue({
+            code: "custom",
+            path: ["mode"],
+            message: "Recurring time rules require fixed_times mode.",
+          });
+        }
+        const assignedDays = new Set<string>();
+        recurrence.timeRules?.forEach((rule, ruleIndex) => {
+          rule.daysOfWeek.forEach((day, dayIndex) => {
+            if (assignedDays.has(day)) {
+              context.addIssue({
+                code: "custom",
+                path: ["timeRules", ruleIndex, "daysOfWeek", dayIndex],
+                message: `${day} has more than one recurring time.`,
+              });
+            }
+            assignedDays.add(day);
+          });
+        });
       })
       .optional(),
     confidence: confidenceSchema,

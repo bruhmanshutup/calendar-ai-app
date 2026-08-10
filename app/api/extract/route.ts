@@ -4,6 +4,7 @@ import { MockTaskExtractionProvider } from "@/lib/providers/mock-extraction";
 import { GeminiTaskExtractionProvider } from "@/lib/providers/gemini-extraction";
 import { OpenAITaskExtractionProvider } from "@/lib/providers/openai-extraction";
 import { recoverExplicitOverdueTasks } from "@/lib/providers/overdue-recovery";
+import { recoverTimedRecurrences } from "@/lib/providers/recurrence-recovery";
 import {
   TaskExtractionError,
   type TaskExtractionProvider,
@@ -52,7 +53,14 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const selected = provider();
     const extracted = await selected.extractor.extractTasks(parsed.data);
-    const result = await recoverExplicitOverdueTasks(parsed.data, extracted);
+    const withOverdueRecovery = await recoverExplicitOverdueTasks(
+      parsed.data,
+      extracted,
+    );
+    const result = await recoverTimedRecurrences(
+      parsed.data,
+      withOverdueRecovery,
+    );
     return NextResponse.json({ ...result, extractionMode: selected.mode });
   } catch (error) {
     const typed =

@@ -7,6 +7,11 @@ Non-negotiable rules:
 - Resolve ISO, numeric, and month-name dates. Treat ambiguous numeric formats such as 8/9 as month/day, lower confidence, add a clarification to missingInformation, and mark reviewRequired.
 - Preserve the exact relevant source text.
 - Separate flexible work, fixed-time events, finite recurring goals, and ignored informational statements.
+- A recurring responsibility with explicit times is actionable, including when different days use different times. Never discard the exception wording as noise and never split it into separate tasks.
+- Use recurrence.mode = "quota" for a finite flexible target such as "gym four times this week". Include count and omit timeRules.
+- Use recurrence.mode = "fixed_times" for an ongoing timed routine. Put every mentioned day into timeRules using local HH:mm times. Group days that share a time, and assign a day only once. Omit count because occurrences are expanded over the planning window.
+- For "take medication every day at 8 AM, but Tuesdays and Thursdays at 10 AM", return one recurring_goal with frequency "daily", fixed_times mode, one 08:00 rule for Monday/Wednesday/Friday/Saturday/Sunday, and one 10:00 rule for Tuesday/Thursday. The title is "Take medication".
+- Phrases such as "except", "but on", "weekdays", "weekends", and day lists are part of a recurring schedule when paired with times; they are not background text.
 - Do not turn every line into a task. Ignore headings, greetings, signatures, email headers, standalone links or dates, random fragments, status updates, and background text with no concrete user action.
 - Status labels appended to a concrete responsibility do not make it a status-only line. In particular, extract actionable dated lines ending in "(OVERDUE)" or "OVERDUE", keep their original past due date, set priority to urgent, and omit the status label from the task title. For example, "Read orientation email 8/04/26 (OVERDUE)" is a task; a standalone "OVERDUE" label is ignored.
 - A reminder, note, or FYI is a task only when it contains a concrete action for the user. "Reminder: submit timesheet Friday" is a task; "Reminder: office closed Friday" is ignored.

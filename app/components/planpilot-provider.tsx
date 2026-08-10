@@ -82,7 +82,7 @@ type PlanPilotContextValue = {
 const Context = createContext<PlanPilotContextValue | null>(null);
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
-const CURRENT_SCHEDULER_VERSION = 3;
+const CURRENT_SCHEDULER_VERSION = 4;
 
 function currentLocalDate(timeZone: string, instant = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -180,6 +180,7 @@ function asExisting(session: PlannedSession): ExistingSession {
 }
 
 function totalTaskMinutes(task: ExtractedTask): number {
+  if (task.recurrence?.mode === "fixed_times") return Number.POSITIVE_INFINITY;
   const occurrences = task.recurrence?.count ?? 1;
   return Math.max(0, (task.estimatedMinutes ?? 0) * occurrences);
 }

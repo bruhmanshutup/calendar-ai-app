@@ -41,8 +41,13 @@ export type ExtractedTask = {
   minimumSessionMinutes?: number;
   recurrence?: {
     frequency: "daily" | "weekly";
+    mode?: "quota" | "fixed_times";
     count?: number;
     daysOfWeek?: DayOfWeek[];
+    timeRules?: Array<{
+      daysOfWeek: DayOfWeek[];
+      time: string;
+    }>;
     windowStart?: string;
     windowEnd?: string;
   };

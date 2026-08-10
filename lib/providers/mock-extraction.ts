@@ -19,6 +19,10 @@ import type {
   TaskPriority,
 } from "@/lib/domain/types";
 import type { TaskExtractionProvider } from "./task-extraction";
+import {
+  parseTimedRecurrence,
+  type ParsedTimedRecurrence,
+} from "./timed-recurrence";
 
 const NUMBER_WORDS: Record<string, number> = {
   one: 1,
@@ -247,6 +251,7 @@ function isTaskCandidate(text: string, datePhrase?: string): boolean {
     hasTaskNoun(text) ||
     isFixedEvent(text) ||
     isDeadlineLanguage(text) ||
+    Boolean(parseTimedRecurrence(text)) ||
     Boolean(recurrenceCount(text)) ||
     Boolean(datePhrase && titleWords.length >= 2)
   );
@@ -268,11 +273,18 @@ function buildTask(
   interpreted: InterpretedDate | undefined,
   input: ExtractionInput,
   index: number,
+  timedRecurrence?: ParsedTimedRecurrence,
 ): ExtractedTask {
   const estimate = estimateMinutes(line);
   const count = recurrenceCount(line);
-  const fixed = isFixedEvent(line) && !isDeadlineLanguage(line);
-  const taskType = count ? "recurring_goal" : fixed ? "fixed_time" : "flexible";
+  const fixed =
+    !timedRecurrence && isFixedEvent(line) && !isDeadlineLanguage(line);
+  const taskType =
+    timedRecurrence || count
+      ? "recurring_goal"
+      : fixed
+        ? "fixed_time"
+        : "flexible";
   const category = categoryFor(line);
   const priority = priorityFor(
     line,
@@ -286,7 +298,7 @@ function buildTask(
       : undefined;
   const missingInformation: string[] = [];
   if (estimate.assumed) missingInformation.push("Confirm effort estimate");
-  if (!interpreted?.date && !count && !fixed) {
+  if (!interpreted?.date && !count && !fixed && !timedRecurrence) {
     missingInformation.push("No deadline was stated");
   }
   if (fixed && !fixedEndAt) missingInformation.push("Fixed event end time");
@@ -301,7 +313,7 @@ function buildTask(
 
   return {
     id: `imported-${index + 1}`,
-    title: titleFor(line, datePhrase),
+    title: titleFor(timedRecurrence?.titleSource ?? line, datePhrase),
     taskType,
     dueDate: !fixed ? interpreted?.date : undefined,
     dueTime: !fixed ? interpreted?.time : undefined,
@@ -323,23 +335,25 @@ function buildTask(
       /\bsplit|over several|across\b/i.test(line) ||
       (estimate.minutes > 60 && !fixed && !count),
     minimumSessionMinutes: count ? estimate.minutes : Math.min(30, estimate.minutes),
-    recurrence: count
-      ? {
+    recurrence: timedRecurrence?.recurrence ??
+      (count
+        ? {
           frequency: "weekly",
+          mode: "quota",
           count,
           windowStart: week?.start,
           windowEnd: week?.end,
         }
-      : undefined,
+        : undefined),
     confidence: reviewRequired ? 0.62 : 0.9,
     fieldConfidence: {
       title: 0.94,
-      taskType: fixed || count ? 0.96 : 0.84,
+      taskType: fixed || count || timedRecurrence ? 0.96 : 0.84,
       dueDate: interpreted?.date ? 0.92 : undefined,
       dueTime: interpreted?.time ? 0.92 : undefined,
       estimatedMinutes: estimate.confidence,
       priority: priority.confidence,
-      recurrence: count ? 0.98 : undefined,
+      recurrence: count || timedRecurrence ? 0.98 : undefined,
     },
     missingInformation,
     sourceText: line,
@@ -369,7 +383,8 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
     const ignoredStatements: ExtractionResult["ignoredStatements"] = [];
 
     lines.forEach((line, index) => {
-      const datePhrase = extractDatePhrase(line);
+      const timedRecurrence = parseTimedRecurrence(line);
+      const datePhrase = timedRecurrence ? undefined : extractDatePhrase(line);
       if (!isTaskCandidate(line, datePhrase)) {
         ignoredStatements.push({
           sourceText: line,
@@ -384,7 +399,16 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
             input.timeZone,
           )
         : undefined;
-      tasks.push(buildTask(line, datePhrase, interpreted, input, index));
+      tasks.push(
+        buildTask(
+          line,
+          datePhrase,
+          interpreted,
+          input,
+          index,
+          timedRecurrence,
+        ),
+      );
     });
 
     return validateAndDedupeExtraction({ tasks, ignoredStatements });

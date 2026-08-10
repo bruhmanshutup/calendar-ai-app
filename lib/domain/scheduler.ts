@@ -1,3 +1,5 @@
+import { addDays, format, parseISO } from "date-fns";
+import { fromZonedTime } from "date-fns-tz";
 import {
   PLANNING_MODE_CONFIG,
   PRIORITY_WEIGHT,
@@ -5,7 +7,9 @@ import {
 } from "./config";
 import { dateOnlyPlanningDeadline } from "./date-interpretation";
 import { explainReasons } from "./explanations";
+import { recurrenceTimeForDay } from "./recurrence";
 import type {
+  DayOfWeek,
   ExtractedTask,
   PlannedSession,
   ScheduleProposal,
@@ -26,6 +30,8 @@ type Candidate = {
   score: number;
   reasons: ScheduleReasonCode[];
 };
+
+type TimedOccurrence = NumericInterval & { date: string };
 
 function toNumeric(interval: TimeInterval): NumericInterval {
   return {
@@ -173,6 +179,12 @@ function taskRisk(
   busy: NumericInterval[],
 ): number {
   const minutes = task.estimatedMinutes ?? 0;
+  if (
+    task.taskType === "fixed_time" ||
+    task.recurrence?.mode === "fixed_times"
+  ) {
+    return 2_000_000 + minutes + PRIORITY_WEIGHT[task.priority];
+  }
   if (isOverdueTask(task, input)) {
     return 100_000 + minutes + PRIORITY_WEIGHT[task.priority];
   }
@@ -190,6 +202,58 @@ function taskRisk(
     80 / hoursRemaining +
     PRIORITY_WEIGHT[task.priority]
   );
+}
+
+function timedOccurrenceSlots(
+  task: ExtractedTask,
+  input: SchedulingInput,
+): TimedOccurrence[] {
+  if (task.recurrence?.mode !== "fixed_times") return [];
+
+  const inputStart = new Date(input.windowStart).getTime();
+  const inputEnd = new Date(input.windowEnd).getTime();
+  const recurrenceStart = task.recurrence.windowStart
+    ? new Date(task.recurrence.windowStart).getTime()
+    : inputStart;
+  const recurrenceEnd = task.recurrence.windowEnd
+    ? new Date(task.recurrence.windowEnd).getTime()
+    : inputEnd;
+  const effectiveStart = Math.max(inputStart, recurrenceStart);
+  const effectiveEnd = Math.min(inputEnd, recurrenceEnd);
+  const firstDate = localParts(effectiveStart, input.preferences.timeZone).date;
+  const lastDate = localParts(effectiveEnd, input.preferences.timeZone).date;
+  const minutes = task.estimatedMinutes ?? 0;
+  const slots: TimedOccurrence[] = [];
+
+  for (
+    let date = firstDate;
+    date <= lastDate;
+    date = format(addDays(parseISO(date), 1), "yyyy-MM-dd")
+  ) {
+    const noon = fromZonedTime(
+      `${date}T12:00:00`,
+      input.preferences.timeZone,
+    ).getTime();
+    const weekday = localParts(noon, input.preferences.timeZone)
+      .weekday as DayOfWeek;
+    if (
+      task.recurrence.daysOfWeek?.length &&
+      !task.recurrence.daysOfWeek.includes(weekday)
+    ) {
+      continue;
+    }
+    const time = recurrenceTimeForDay(task.recurrence, weekday);
+    if (!time) continue;
+    const start = fromZonedTime(
+      `${date}T${time}:00`,
+      input.preferences.timeZone,
+    ).getTime();
+    const end = start + minutes * MINUTE;
+    if (start < effectiveStart || end > effectiveEnd) continue;
+    slots.push({ start, end, date });
+  }
+
+  return slots;
 }
 
 function candidateReasons(
@@ -628,6 +692,40 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       continue;
     }
 
+    if (task.recurrence?.mode === "fixed_times") {
+      const occurrences = timedOccurrenceSlots(task, input);
+      let conflictedMinutes = 0;
+      for (const [index, slot] of occurrences.entries()) {
+        const minutes = intervalMinutes(slot);
+        if (!isInside(slot, availability) || !isFree(slot, busy)) {
+          conflictedMinutes += minutes;
+          continue;
+        }
+        const reasons: ScheduleReasonCode[] = ["FIXED_TIME"];
+        const session: PlannedSession = {
+          id: `session-${task.id}-${slot.date}-${index + 1}`,
+          taskId: task.id ?? task.title,
+          title: task.title,
+          start: new Date(slot.start).toISOString(),
+          end: new Date(slot.end).toISOString(),
+          minutes,
+          status: "proposed",
+          locked: true,
+          reasonCodes: reasons,
+          explanation: explainReasons(reasons),
+        };
+        sessions.push(session);
+        busy.push({ start: slot.start, end: slot.end });
+        newlyPlannedMinutes += minutes;
+      }
+      if (conflictedMinutes > 0) {
+        unschedulableTasks.push(
+          unschedulable(task, conflictedMinutes, "FIXED_TIME_CONFLICT"),
+        );
+      }
+      continue;
+    }
+
     const occurrences =
       task.taskType === "recurring_goal"
         ? Math.max(1, task.recurrence?.count ?? 1)
@@ -752,7 +850,9 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
   );
   const requiredMinutes = normalizedTasks.reduce((total, task) => {
     const occurrences =
-      task.taskType === "recurring_goal"
+      task.recurrence?.mode === "fixed_times"
+        ? timedOccurrenceSlots(task, input).length
+        : task.taskType === "recurring_goal"
         ? Math.max(1, task.recurrence?.count ?? 1)
         : 1;
     return total + (task.estimatedMinutes ?? 0) * occurrences;
