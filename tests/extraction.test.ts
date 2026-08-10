@@ -260,6 +260,7 @@ describe("extraction validation and mock interpretation", () => {
       recurrence: {
         mode: "fixed_times",
         timeRules: [
+          { daysOfWeek: ["saturday", "sunday"], time: "10:00" },
           {
             daysOfWeek: [
               "monday",
@@ -270,11 +271,60 @@ describe("extraction validation and mock interpretation", () => {
             ],
             time: "18:00",
           },
-          { daysOfWeek: ["saturday", "sunday"], time: "10:00" },
         ],
       },
     });
     expect(result.ignoredStatements).toHaveLength(0);
+  });
+
+  it("preserves ambiguous recurrence wording for review instead of treating it as noise", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: "Exercise every day at 8 except holidays.",
+    });
+
+    expect(result.tasks).toHaveLength(1);
+    expect(result.ignoredStatements).toHaveLength(0);
+    expect(result.tasks[0]).toMatchObject({
+      title: "Exercise",
+      taskType: "recurring_goal",
+      reviewRequired: true,
+      approved: false,
+    });
+    expect(result.tasks[0].missingInformation).toEqual(
+      expect.arrayContaining([
+        "Clarify AM or PM for the recurring time",
+        "Clarify the unsupported exception: except holidays",
+      ]),
+    );
+  });
+
+  it("validates multiple exact occurrences on the same recurring day", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: "Take medication every day at 8 AM and 8 PM.",
+    });
+
+    expect(result.tasks[0].recurrence?.timeRules).toEqual([
+      { daysOfWeek: [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+      ], time: "08:00" },
+      { daysOfWeek: [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+      ], time: "20:00" },
+    ]);
   });
 
   it("rejects invalid structured output", () => {

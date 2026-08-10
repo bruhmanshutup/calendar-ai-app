@@ -40,13 +40,38 @@ export type ExtractedTask = {
   splittable: boolean;
   minimumSessionMinutes?: number;
   recurrence?: {
-    frequency: "daily" | "weekly";
+    frequency: "daily" | "weekly" | "monthly";
     mode?: "quota" | "fixed_times";
+    interval?: number;
+    anchorDate?: string;
+    occurrenceLimit?: number;
     count?: number;
     daysOfWeek?: DayOfWeek[];
     timeRules?: Array<{
       daysOfWeek: DayOfWeek[];
       time: string;
+    }>;
+    monthlyRules?: Array<
+      | {
+          type: "days_of_month";
+          daysOfMonth: number[];
+          times: string[];
+        }
+      | {
+          type: "ordinal_weekday";
+          ordinal: 1 | 2 | 3 | 4 | 5 | -1;
+          dayOfWeek: DayOfWeek;
+          times: string[];
+        }
+      | {
+          type: "last_day_of_month";
+          times: string[];
+        }
+    >;
+    dateOverrides?: Array<{
+      date: string;
+      skip?: boolean;
+      times?: string[];
     }>;
     windowStart?: string;
     windowEnd?: string;

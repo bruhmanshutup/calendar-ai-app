@@ -14,26 +14,30 @@ export type RecurrenceTimeRule = NonNullable<
   NonNullable<ExtractedTask["recurrence"]>["timeRules"]
 >[number];
 
-export function recurrenceTimeForDay(
+export function recurrenceTimesForDay(
   recurrence: ExtractedTask["recurrence"],
   day: DayOfWeek,
-): string | undefined {
-  return recurrence?.timeRules?.find((rule) =>
-    rule.daysOfWeek.includes(day),
-  )?.time;
+): string[] {
+  return [
+    ...new Set(
+      recurrence?.timeRules
+        ?.filter((rule) => rule.daysOfWeek.includes(day))
+        .map((rule) => rule.time) ?? [],
+    ),
+  ].sort();
 }
 
-export function groupRecurrenceDayTimes(
-  times: Partial<Record<DayOfWeek, string>>,
+export function groupRecurrenceDaySchedules(
+  schedules: Partial<Record<DayOfWeek, string[]>>,
 ): RecurrenceTimeRule[] {
-  const grouped = new Map<string, DayOfWeek[]>();
+  const daysByTime = new Map<string, DayOfWeek[]>();
   for (const day of DAYS_OF_WEEK) {
-    const time = times[day];
-    if (!time) continue;
-    grouped.set(time, [...(grouped.get(time) ?? []), day]);
+    const times = [...new Set(schedules[day] ?? [])].sort();
+    for (const time of times) {
+      daysByTime.set(time, [...(daysByTime.get(time) ?? []), day]);
+    }
   }
-  return [...grouped.entries()].map(([time, daysOfWeek]) => ({
-    daysOfWeek,
-    time,
-  }));
+  return [...daysByTime.entries()]
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(([time, daysOfWeek]) => ({ daysOfWeek, time }));
 }

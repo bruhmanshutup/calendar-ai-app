@@ -1162,8 +1162,22 @@ p {
 .recurrence-time-editor { border: 1px solid var(--line); border-radius: 9px; grid-column: 1 / -1; margin: 0; padding: 14px; }
 .recurrence-time-editor legend { color: var(--text); font-size: 10px; font-weight: 700; padding: 0 5px; }
 .recurrence-time-editor > p { color: var(--faint); font-size: 9px; margin: 0 0 11px; }
-.recurrence-time-editor > div { display: grid; gap: 8px; grid-template-columns: repeat(7, minmax(72px, 1fr)); }
-.recurrence-time-editor label { text-transform: capitalize; }
+.recurrence-day-grid { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.recurrence-day-row { align-items: flex-start; background: var(--surface-soft); border-radius: 7px; display: grid; gap: 8px; grid-template-columns: 30px 1fr; padding: 8px; }
+.recurrence-day-row > strong { color: var(--muted); font-size: 9px; padding-top: 8px; }
+.recurrence-day-row > div { align-items: center; display: flex; flex-wrap: wrap; gap: 5px; }
+.recurrence-time-control { align-items: center; display: inline-flex; }
+.recurrence-time-control input,
+.recurrence-day-row > div > input { border-radius: 6px 0 0 6px; height: 31px; margin: 0; width: 100px; }
+.recurrence-time-control button { align-items: center; background: var(--surface); border: 1px solid var(--line); border-left: 0; border-radius: 0 6px 6px 0; color: var(--faint); display: inline-flex; height: 31px; justify-content: center; width: 27px; }
+.recurrence-time-control button:disabled { cursor: not-allowed; opacity: 0.35; }
+.recurrence-add-time { align-items: center; background: transparent; border: 0; color: var(--brand); display: inline-flex; font-size: 8px; gap: 3px; padding: 6px; }
+.recurrence-off { color: var(--faint); font-size: 9px; padding: 6px 3px; }
+.recurrence-monthly-editor > span { color: var(--muted); display: block; font-size: 8.5px; }
+.recurrence-exception-list ul { display: flex; flex-wrap: wrap; gap: 7px; list-style: none; margin: 0; padding: 0; }
+.recurrence-exception-list li { background: var(--surface-soft); border-radius: 7px; display: flex; gap: 8px; padding: 8px 10px; }
+.recurrence-exception-list li strong { font-size: 9px; }
+.recurrence-exception-list li span { color: var(--muted); font-size: 9px; }
 .task-card-actions { align-items: center; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; min-height: 49px; padding: 8px 20px; }
 .task-card-actions > button:not(.button) { background: transparent; border: 0; color: var(--muted); font-size: 9px; margin-right: auto; }
 .sticky-review-action { align-items: center; background: color-mix(in srgb, var(--surface) 94%, transparent); border: 1px solid var(--line); border-radius: 12px; bottom: 16px; box-shadow: 0 14px 35px rgba(30, 48, 39, 0.12); display: flex; justify-content: space-between; margin-top: 20px; padding: 12px 14px 12px 18px; position: sticky; z-index: 8; }
@@ -1463,7 +1477,7 @@ p {
   .task-field-summary > div { border-bottom: 1px solid var(--line); border-right: 0; padding: 9px 4px; }
   .task-edit-grid { grid-template-columns: 1fr; padding: 14px; }
   .task-edit-grid .check-field { grid-column: auto; }
-  .recurrence-time-editor > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .recurrence-day-grid { grid-template-columns: 1fr; }
   .sticky-review-action { align-items: stretch; flex-direction: column; gap: 10px; }
   .schedule-toolbar { flex-wrap: wrap; gap: 9px; padding: 9px; }
   .inline-check,

@@ -1,4 +1,11 @@
-import { addDays, format, parseISO } from "date-fns";
+import {
+  addDays,
+  differenceInCalendarDays,
+  differenceInCalendarMonths,
+  differenceInCalendarWeeks,
+  format,
+  parseISO,
+} from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import {
   PLANNING_MODE_CONFIG,
@@ -7,7 +14,7 @@ import {
 } from "./config";
 import { dateOnlyPlanningDeadline } from "./date-interpretation";
 import { explainReasons } from "./explanations";
-import { recurrenceTimeForDay } from "./recurrence";
+import { recurrenceTimesForDay } from "./recurrence";
 import type {
   DayOfWeek,
   ExtractedTask,
@@ -31,7 +38,7 @@ type Candidate = {
   reasons: ScheduleReasonCode[];
 };
 
-type TimedOccurrence = NumericInterval & { date: string };
+type TimedOccurrence = NumericInterval & { date: string; time: string };
 
 function toNumeric(interval: TimeInterval): NumericInterval {
   return {
@@ -220,10 +227,62 @@ function timedOccurrenceSlots(
     : inputEnd;
   const effectiveStart = Math.max(inputStart, recurrenceStart);
   const effectiveEnd = Math.min(inputEnd, recurrenceEnd);
+  if (effectiveEnd <= effectiveStart) return [];
   const firstDate = localParts(effectiveStart, input.preferences.timeZone).date;
   const lastDate = localParts(effectiveEnd, input.preferences.timeZone).date;
-  const minutes = task.estimatedMinutes ?? 0;
   const slots: TimedOccurrence[] = [];
+  const recurrence = task.recurrence;
+  const interval = recurrence.interval ?? 1;
+  const anchorDate = recurrence.anchorDate ?? firstDate;
+
+  const dateMatchesInterval = (date: string): boolean => {
+    if (date < anchorDate) return false;
+    if (interval <= 1) return true;
+    if (recurrence.frequency === "daily") {
+      return (
+        differenceInCalendarDays(parseISO(date), parseISO(anchorDate)) %
+          interval ===
+        0
+      );
+    }
+    if (recurrence.frequency === "weekly") {
+      return (
+        differenceInCalendarWeeks(parseISO(date), parseISO(anchorDate), {
+          weekStartsOn: 1,
+        }) %
+          interval ===
+        0
+      );
+    }
+    return (
+      differenceInCalendarMonths(parseISO(date), parseISO(anchorDate)) %
+        interval ===
+      0
+    );
+  };
+
+  const monthlyTimes = (date: string, weekday: DayOfWeek): string[] => {
+    const dayOfMonth = Number(date.slice(8, 10));
+    const ordinal = Math.floor((dayOfMonth - 1) / 7) + 1;
+    const nextWeek = format(addDays(parseISO(date), 7), "yyyy-MM-dd");
+    const isLast = nextWeek.slice(0, 7) !== date.slice(0, 7);
+    return [
+      ...new Set(
+        recurrence.monthlyRules?.flatMap((rule) => {
+          if (rule.type === "days_of_month") {
+            return rule.daysOfMonth.includes(dayOfMonth) ? rule.times : [];
+          }
+          if (rule.type === "last_day_of_month") {
+            return isLast ? rule.times : [];
+          }
+          return rule.dayOfWeek === weekday &&
+            (rule.ordinal === ordinal || (rule.ordinal === -1 && isLast))
+            ? rule.times
+            : [];
+        }) ?? [],
+      ),
+    ].sort();
+  };
 
   for (
     let date = firstDate;
@@ -236,24 +295,43 @@ function timedOccurrenceSlots(
     ).getTime();
     const weekday = localParts(noon, input.preferences.timeZone)
       .weekday as DayOfWeek;
-    if (
-      task.recurrence.daysOfWeek?.length &&
-      !task.recurrence.daysOfWeek.includes(weekday)
-    ) {
-      continue;
+    const override = recurrence.dateOverrides?.find(
+      (item) => item.date === date,
+    );
+    if (override?.skip) continue;
+    if (!override && !dateMatchesInterval(date)) continue;
+
+    let times: string[];
+    if (override?.times?.length) {
+      times = [...override.times].sort();
+    } else if (recurrence.frequency === "monthly") {
+      times = monthlyTimes(date, weekday);
+    } else {
+      if (
+        recurrence.daysOfWeek?.length &&
+        !recurrence.daysOfWeek.includes(weekday)
+      ) {
+        continue;
+      }
+      times = recurrenceTimesForDay(recurrence, weekday);
     }
-    const time = recurrenceTimeForDay(task.recurrence, weekday);
-    if (!time) continue;
-    const start = fromZonedTime(
-      `${date}T${time}:00`,
-      input.preferences.timeZone,
-    ).getTime();
-    const end = start + minutes * MINUTE;
-    if (start < effectiveStart || end > effectiveEnd) continue;
-    slots.push({ start, end, date });
+
+    for (const time of times) {
+      const duration = task.estimatedMinutes ?? 0;
+      const start = fromZonedTime(
+        `${date}T${time}:00`,
+        input.preferences.timeZone,
+      ).getTime();
+      const end = start + duration * MINUTE;
+      if (start < effectiveStart || end > effectiveEnd) continue;
+      slots.push({ start, end, date, time });
+    }
   }
 
-  return slots;
+  const ordered = slots.sort((first, second) => first.start - second.start);
+  return recurrence.occurrenceLimit
+    ? ordered.slice(0, recurrence.occurrenceLimit)
+    : ordered;
 }
 
 function candidateReasons(
@@ -703,7 +781,7 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         }
         const reasons: ScheduleReasonCode[] = ["FIXED_TIME"];
         const session: PlannedSession = {
-          id: `session-${task.id}-${slot.date}-${index + 1}`,
+          id: `session-${task.id}-${slot.date}-${slot.time.replace(":", "")}-${index + 1}`,
           taskId: task.id ?? task.title,
           title: task.title,
           start: new Date(slot.start).toISOString(),
@@ -849,10 +927,17 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       a.id.localeCompare(b.id),
   );
   const requiredMinutes = normalizedTasks.reduce((total, task) => {
+    if (task.recurrence?.mode === "fixed_times") {
+      return (
+        total +
+        timedOccurrenceSlots(task, input).reduce(
+          (minutes, slot) => minutes + intervalMinutes(slot),
+          0,
+        )
+      );
+    }
     const occurrences =
-      task.recurrence?.mode === "fixed_times"
-        ? timedOccurrenceSlots(task, input).length
-        : task.taskType === "recurring_goal"
+      task.taskType === "recurring_goal"
         ? Math.max(1, task.recurrence?.count ?? 1)
         : 1;
     return total + (task.estimatedMinutes ?? 0) * occurrences;

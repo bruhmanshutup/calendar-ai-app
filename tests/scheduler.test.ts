@@ -332,6 +332,388 @@ describe("deterministic scheduling", () => {
     expect(proposal.unschedulable).toHaveLength(0);
   });
 
+  it("supports multiple occurrences per day and a replacement-day schedule", () => {
+    const dates = [
+      "2026-07-27",
+      "2026-07-28",
+      "2026-07-29",
+      "2026-07-30",
+      "2026-07-31",
+      "2026-08-01",
+      "2026-08-02",
+    ];
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "twice-daily",
+            title: "Take medication",
+            taskType: "recurring_goal",
+            estimatedMinutes: 15,
+            recurrence: {
+              frequency: "daily",
+              mode: "fixed_times",
+              daysOfWeek: [
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday",
+              ],
+              timeRules: [
+                {
+                  daysOfWeek: [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                    "saturday",
+                  ],
+                  time: "08:00",
+                },
+                {
+                  daysOfWeek: [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                    "saturday",
+                  ],
+                  time: "20:00",
+                },
+                { daysOfWeek: ["sunday"], time: "09:00" },
+              ],
+            },
+          }),
+        ],
+        {
+          windowEnd: "2026-08-02T23:00:00.000Z",
+          availability: dates.map((date) => ({
+            start: `${date}T07:00:00.000Z`,
+            end: `${date}T21:00:00.000Z`,
+          })),
+        },
+      ),
+    );
+    const sessions = proposal.sessions.filter(
+      (session) => session.taskId === "twice-daily",
+    );
+
+    expect(sessions).toHaveLength(13);
+    expect(
+      sessions.filter((session) => session.start.startsWith("2026-08-02"))
+        .map((session) => session.start),
+    ).toEqual(["2026-08-02T09:00:00.000Z"]);
+  });
+
+  it("applies one-date replacements and skips without changing later weeks", () => {
+    const dates = [
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+    ];
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "date-exceptions",
+            title: "Daily routine",
+            taskType: "recurring_goal",
+            estimatedMinutes: 30,
+            recurrence: {
+              frequency: "daily",
+              mode: "fixed_times",
+              daysOfWeek: [
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday",
+              ],
+              timeRules: [
+                {
+                  daysOfWeek: [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                    "saturday",
+                    "sunday",
+                  ],
+                  time: "09:00",
+                },
+              ],
+              dateOverrides: [
+                { date: "2026-08-12", times: ["11:00"] },
+                { date: "2026-08-13", skip: true },
+              ],
+            },
+          }),
+        ],
+        {
+          windowStart: "2026-08-10T00:00:00.000Z",
+          windowEnd: "2026-08-15T00:00:00.000Z",
+          availability: dates.map((date) => ({
+            start: `${date}T07:00:00.000Z`,
+            end: `${date}T13:00:00.000Z`,
+          })),
+        },
+      ),
+    );
+    const starts = proposal.sessions
+      .filter((session) => session.taskId === "date-exceptions")
+      .map((session) => session.start);
+
+    expect(starts).toEqual([
+      "2026-08-10T09:00:00.000Z",
+      "2026-08-11T09:00:00.000Z",
+      "2026-08-12T11:00:00.000Z",
+      "2026-08-14T09:00:00.000Z",
+    ]);
+  });
+
+  it("uses the explicit anchor for every-other-day schedules", () => {
+    const dates = [
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-15",
+      "2026-08-16",
+    ];
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "alternating",
+            title: "Water plants",
+            taskType: "recurring_goal",
+            estimatedMinutes: 15,
+            recurrence: {
+              frequency: "daily",
+              mode: "fixed_times",
+              interval: 2,
+              anchorDate: "2026-08-10",
+              daysOfWeek: [
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday",
+              ],
+              timeRules: [
+                { daysOfWeek: [
+                  "monday",
+                  "tuesday",
+                  "wednesday",
+                  "thursday",
+                  "friday",
+                  "saturday",
+                  "sunday",
+                ], time: "08:00" },
+              ],
+            },
+          }),
+        ],
+        {
+          windowStart: "2026-08-10T00:00:00.000Z",
+          windowEnd: "2026-08-17T00:00:00.000Z",
+          availability: dates.map((date) => ({
+            start: `${date}T07:00:00.000Z`,
+            end: `${date}T10:00:00.000Z`,
+          })),
+        },
+      ),
+    );
+
+    expect(
+      proposal.sessions
+        .filter((session) => session.taskId === "alternating")
+        .map((session) => session.start.slice(0, 10)),
+    ).toEqual(["2026-08-10", "2026-08-12", "2026-08-14", "2026-08-16"]);
+  });
+
+  it("stops a fixed recurrence at its explicit occurrence limit", () => {
+    const dates = ["2026-08-10", "2026-08-11", "2026-08-12"];
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "limited-routine",
+            title: "Limited routine",
+            taskType: "recurring_goal",
+            estimatedMinutes: 15,
+            recurrence: {
+              frequency: "daily",
+              mode: "fixed_times",
+              occurrenceLimit: 3,
+              daysOfWeek: [
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday",
+              ],
+              timeRules: [
+                {
+                  daysOfWeek: [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                    "saturday",
+                    "sunday",
+                  ],
+                  time: "08:00",
+                },
+                {
+                  daysOfWeek: [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                    "saturday",
+                    "sunday",
+                  ],
+                  time: "20:00",
+                },
+              ],
+            },
+          }),
+        ],
+        {
+          windowStart: "2026-08-10T00:00:00.000Z",
+          windowEnd: "2026-08-13T00:00:00.000Z",
+          availability: dates.map((date) => ({
+            start: `${date}T07:00:00.000Z`,
+            end: `${date}T21:00:00.000Z`,
+          })),
+        },
+      ),
+    );
+
+    expect(
+      proposal.sessions
+        .filter((session) => session.taskId === "limited-routine")
+        .map((session) => session.start),
+    ).toEqual([
+      "2026-08-10T08:00:00.000Z",
+      "2026-08-10T20:00:00.000Z",
+      "2026-08-11T08:00:00.000Z",
+    ]);
+  });
+
+  it("schedules monthly dates and ordinal weekdays without moving invalid dates", () => {
+    const availability = [
+      "2026-08-03",
+      "2026-08-28",
+      "2026-08-31",
+      "2026-09-07",
+      "2026-09-25",
+    ].map((date) => ({
+      start: `${date}T07:00:00.000Z`,
+      end: `${date}T19:00:00.000Z`,
+    }));
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "month-31",
+            title: "Month-end task",
+            taskType: "recurring_goal",
+            estimatedMinutes: 30,
+            recurrence: {
+              frequency: "monthly",
+              mode: "fixed_times",
+              monthlyRules: [
+                { type: "days_of_month", daysOfMonth: [31], times: ["09:00"] },
+              ],
+            },
+          }),
+          task({
+            id: "first-monday",
+            title: "First Monday task",
+            taskType: "recurring_goal",
+            estimatedMinutes: 30,
+            recurrence: {
+              frequency: "monthly",
+              mode: "fixed_times",
+              monthlyRules: [
+                {
+                  type: "ordinal_weekday",
+                  ordinal: 1,
+                  dayOfWeek: "monday",
+                  times: ["10:00"],
+                },
+              ],
+            },
+          }),
+          task({
+            id: "last-friday",
+            title: "Last Friday task",
+            taskType: "recurring_goal",
+            estimatedMinutes: 30,
+            recurrence: {
+              frequency: "monthly",
+              mode: "fixed_times",
+              monthlyRules: [
+                {
+                  type: "ordinal_weekday",
+                  ordinal: -1,
+                  dayOfWeek: "friday",
+                  times: ["17:00"],
+                },
+              ],
+            },
+          }),
+        ],
+        {
+          windowStart: "2026-08-01T00:00:00.000Z",
+          windowEnd: "2026-10-01T00:00:00.000Z",
+          availability,
+        },
+      ),
+    );
+
+    expect(
+      proposal.sessions
+        .filter((session) => session.taskId === "month-31")
+        .map((session) => session.start),
+    ).toEqual(["2026-08-31T09:00:00.000Z"]);
+    expect(
+      proposal.sessions
+        .filter((session) => session.taskId === "first-monday")
+        .map((session) => session.start),
+    ).toEqual([
+      "2026-08-03T10:00:00.000Z",
+      "2026-09-07T10:00:00.000Z",
+    ]);
+    expect(
+      proposal.sessions
+        .filter((session) => session.taskId === "last-friday")
+        .map((session) => session.start),
+    ).toEqual([
+      "2026-08-28T17:00:00.000Z",
+      "2026-09-25T17:00:00.000Z",
+    ]);
+  });
+
   it("retains the configured buffer", () => {
     const proposal = generateSchedule(
       scheduling(

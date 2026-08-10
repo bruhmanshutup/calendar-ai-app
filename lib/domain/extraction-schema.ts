@@ -11,6 +11,7 @@ const dayOfWeekSchema = z.enum([
 ]);
 
 const confidenceSchema = z.number().min(0).max(1);
+const clockTimeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 
 export const extractedTaskSchema = z
   .object({
@@ -41,51 +42,133 @@ export const extractedTaskSchema = z
     minimumSessionMinutes: z.number().int().positive().max(240).optional(),
     recurrence: z
       .object({
-        frequency: z.enum(["daily", "weekly"]),
+        frequency: z.enum(["daily", "weekly", "monthly"]),
         mode: z.enum(["quota", "fixed_times"]).optional(),
+        interval: z.number().int().positive().max(365).optional(),
+        anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        occurrenceLimit: z.number().int().positive().max(10_000).optional(),
         count: z.number().int().positive().max(31).optional(),
         daysOfWeek: z.array(dayOfWeekSchema).max(7).optional(),
         timeRules: z
           .array(
             z.object({
               daysOfWeek: z.array(dayOfWeekSchema).min(1).max(7),
-              time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+              time: clockTimeSchema,
             }),
           )
           .min(1)
-          .max(7)
+          .max(28)
+          .optional(),
+        monthlyRules: z
+          .array(
+            z.discriminatedUnion("type", [
+              z.object({
+                type: z.literal("days_of_month"),
+                daysOfMonth: z.array(z.number().int().min(1).max(31)).min(1).max(31),
+                times: z.array(clockTimeSchema).min(1).max(8),
+              }),
+              z.object({
+                type: z.literal("ordinal_weekday"),
+                ordinal: z.union([
+                  z.literal(1),
+                  z.literal(2),
+                  z.literal(3),
+                  z.literal(4),
+                  z.literal(5),
+                  z.literal(-1),
+                ]),
+                dayOfWeek: dayOfWeekSchema,
+                times: z.array(clockTimeSchema).min(1).max(8),
+              }),
+              z.object({
+                type: z.literal("last_day_of_month"),
+                times: z.array(clockTimeSchema).min(1).max(8),
+              }),
+            ]),
+          )
+          .min(1)
+          .max(12)
+          .optional(),
+        dateOverrides: z
+          .array(
+            z
+              .object({
+                date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+                skip: z.boolean().optional(),
+                times: z.array(clockTimeSchema).min(1).max(8).optional(),
+              })
+              .superRefine((override, context) => {
+                if (!override.skip && !override.times?.length) {
+                  context.addIssue({
+                    code: "custom",
+                    path: ["times"],
+                    message: "A date override must either skip the date or provide times.",
+                  });
+                }
+                if (override.skip && override.times?.length) {
+                  context.addIssue({
+                    code: "custom",
+                    path: ["times"],
+                    message: "A skipped date cannot also provide occurrence times.",
+                  });
+                }
+              }),
+          )
+          .max(50)
           .optional(),
         windowStart: z.string().datetime({ offset: true }).optional(),
         windowEnd: z.string().datetime({ offset: true }).optional(),
       })
       .superRefine((recurrence, context) => {
-        if (recurrence.mode === "fixed_times" && !recurrence.timeRules?.length) {
-          context.addIssue({
-            code: "custom",
-            path: ["timeRules"],
-            message: "A fixed recurring schedule requires at least one day and time rule.",
-          });
-        }
-        if (recurrence.mode !== "fixed_times" && recurrence.timeRules?.length) {
+        if (
+          recurrence.mode !== "fixed_times" &&
+          (recurrence.timeRules?.length || recurrence.monthlyRules?.length)
+        ) {
           context.addIssue({
             code: "custom",
             path: ["mode"],
             message: "Recurring time rules require fixed_times mode.",
           });
         }
-        const assignedDays = new Set<string>();
+        const assignedDayTimes = new Set<string>();
         recurrence.timeRules?.forEach((rule, ruleIndex) => {
           rule.daysOfWeek.forEach((day, dayIndex) => {
-            if (assignedDays.has(day)) {
+            const key = `${day}|${rule.time}`;
+            if (assignedDayTimes.has(key)) {
               context.addIssue({
                 code: "custom",
                 path: ["timeRules", ruleIndex, "daysOfWeek", dayIndex],
-                message: `${day} has more than one recurring time.`,
+                message: `${day} repeats the ${rule.time} recurring time.`,
               });
             }
-            assignedDays.add(day);
+            assignedDayTimes.add(key);
           });
         });
+        if (recurrence.frequency === "monthly" && recurrence.timeRules?.length) {
+          context.addIssue({
+            code: "custom",
+            path: ["timeRules"],
+            message: "Monthly recurrences must use monthlyRules.",
+          });
+        }
+        if (recurrence.frequency !== "monthly" && recurrence.monthlyRules?.length) {
+          context.addIssue({
+            code: "custom",
+            path: ["monthlyRules"],
+            message: "monthlyRules require monthly frequency.",
+          });
+        }
+        if (
+          recurrence.windowStart &&
+          recurrence.windowEnd &&
+          new Date(recurrence.windowEnd) < new Date(recurrence.windowStart)
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["windowEnd"],
+            message: "The recurrence end must not precede its start.",
+          });
+        }
       })
       .optional(),
     confidence: confidenceSchema,
@@ -109,6 +192,29 @@ export const extractedTaskSchema = z
     cancelledAt: z.string().datetime({ offset: true }).optional(),
   })
   .superRefine((task, context) => {
+    if (
+      task.recurrence?.mode === "fixed_times" &&
+      !task.recurrence.timeRules?.length &&
+      !task.recurrence.monthlyRules?.length &&
+      !task.reviewRequired
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["recurrence"],
+        message: "A fixed recurring schedule without exact rules must require review.",
+      });
+    }
+    if (
+      (task.recurrence?.interval ?? 1) > 1 &&
+      !task.recurrence?.anchorDate &&
+      !task.reviewRequired
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["recurrence", "anchorDate"],
+        message: "An interval recurrence needs an anchor date or review.",
+      });
+    }
     if (task.dueTime && !task.dueDate) {
       context.addIssue({
         code: "custom",

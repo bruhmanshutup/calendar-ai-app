@@ -59,8 +59,8 @@ import type {
 } from "@/lib/domain/types";
 import {
   DAYS_OF_WEEK,
-  groupRecurrenceDayTimes,
-  recurrenceTimeForDay,
+  groupRecurrenceDaySchedules,
+  recurrenceTimesForDay,
 } from "@/lib/domain/recurrence";
 import { usePlanPilot } from "./planpilot-provider";
 
@@ -199,14 +199,47 @@ function recurrenceSummary(task: ExtractedTask): string {
   const recurrence = task.recurrence;
   if (!recurrence) return "Not configured";
   if (recurrence.mode === "fixed_times") {
-    return (
-      recurrence.timeRules
-        ?.map(
-          (rule) =>
-            `${formatRecurringDays(rule.daysOfWeek)} at ${formatClockTime(rule.time)}`,
-        )
-        .join(" · ") ?? "Times need review"
-    );
+    const interval = recurrence.interval ?? 1;
+    const intervalLabel =
+      interval > 1
+        ? `Every ${interval} ${recurrence.frequency === "daily" ? "days" : recurrence.frequency === "weekly" ? "weeks" : "months"}: `
+        : "";
+    const weekly = recurrence.timeRules
+      ?.map(
+        (rule) =>
+          `${formatRecurringDays(rule.daysOfWeek)} at ${formatClockTime(rule.time)}`,
+      )
+      .join(" · ");
+    const ordinalLabel: Record<number, string> = {
+      1: "First",
+      2: "Second",
+      3: "Third",
+      4: "Fourth",
+      5: "Fifth",
+      [-1]: "Last",
+    };
+    const monthly = recurrence.monthlyRules
+      ?.map((rule) =>
+        rule.type === "days_of_month"
+          ? `Monthly on ${rule.daysOfMonth.join(", ")} at ${rule.times.map(formatClockTime).join(" and ")}`
+          : rule.type === "last_day_of_month"
+            ? `Last day monthly at ${rule.times.map(formatClockTime).join(" and ")}`
+            : `${ordinalLabel[rule.ordinal]} ${SHORT_DAY_LABELS[rule.dayOfWeek]} monthly at ${rule.times.map(formatClockTime).join(" and ")}`,
+      )
+      .join(" · ");
+    const exceptions = recurrence.dateOverrides?.length
+      ? ` · ${recurrence.dateOverrides.length} date exception${recurrence.dateOverrides.length === 1 ? "" : "s"}`
+      : "";
+    const limit = recurrence.occurrenceLimit
+      ? ` for ${recurrence.occurrenceLimit} occurrence${recurrence.occurrenceLimit === 1 ? "" : "s"}`
+      : "";
+    const anchor = recurrence.anchorDate
+      ? ` starting ${shortDate(recurrence.anchorDate)}`
+      : "";
+    const ending = recurrence.windowEnd
+      ? ` through ${formatDay(recurrence.windowEnd)}`
+      : "";
+    return `${intervalLabel}${weekly || monthly || "Times need review"}${anchor}${ending}${limit}${exceptions}`;
   }
   const count = recurrence.count ?? 1;
   return `${count} time${count === 1 ? "" : "s"} ${recurrence.frequency}`;
@@ -1132,28 +1165,51 @@ function ImportView() {
 export function TaskReviewCard({ task }: { task: ExtractedTask }) {
   const { updateTask, approveTask, deleteTask } = usePlanPilot();
   const [expanded, setExpanded] = useState(task.reviewRequired ?? false);
-  const updateRecurringTime = (day: DayOfWeek, time: string) => {
+  const [addingTimeFor, setAddingTimeFor] = useState<DayOfWeek>();
+  const saveRecurringSchedules = (
+    schedules: Partial<Record<DayOfWeek, string[]>>,
+  ) => {
     if (task.recurrence?.mode !== "fixed_times") return;
-    const times = Object.fromEntries(
-      DAYS_OF_WEEK.map((item) => [
-        item,
-        recurrenceTimeForDay(task.recurrence, item),
-      ]),
-    ) as Partial<Record<DayOfWeek, string>>;
-    if (time) {
-      times[day] = time;
-    } else {
-      delete times[day];
-    }
-    const timeRules = groupRecurrenceDayTimes(times);
+    const timeRules = groupRecurrenceDaySchedules(schedules);
     if (timeRules.length === 0) return;
     updateTask(task.id ?? "", {
       recurrence: {
         ...task.recurrence,
-        daysOfWeek: DAYS_OF_WEEK.filter((item) => Boolean(times[item])),
+        daysOfWeek: DAYS_OF_WEEK.filter(
+          (item) => (schedules[item]?.length ?? 0) > 0,
+        ),
         timeRules,
       },
     });
+  };
+  const daySchedules = () =>
+    Object.fromEntries(
+      DAYS_OF_WEEK.map((day) => [
+        day,
+        recurrenceTimesForDay(task.recurrence, day),
+      ]),
+    ) as Record<DayOfWeek, string[]>;
+  const updateRecurringTime = (
+    day: DayOfWeek,
+    previousTime: string,
+    nextTime: string,
+  ) => {
+    const schedules = daySchedules();
+    schedules[day] = [
+      ...new Set(
+        schedules[day]
+          .map((time) => (time === previousTime ? nextTime : time))
+          .filter(Boolean),
+      ),
+    ].sort();
+    saveRecurringSchedules(schedules);
+  };
+  const addRecurringTime = (day: DayOfWeek, time: string) => {
+    if (!time) return;
+    const schedules = daySchedules();
+    schedules[day] = [...new Set([...schedules[day], time])].sort();
+    saveRecurringSchedules(schedules);
+    setAddingTimeFor(undefined);
   };
   return (
     <article className={`task-review-card ${task.reviewRequired ? "needs-review" : ""}`}>
@@ -1313,27 +1369,95 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
             <input type="checkbox" checked={task.splittable} onChange={(event) => updateTask(task.id ?? "", { splittable: event.target.checked })} />
             May be split into sessions
           </label>
-          {task.recurrence?.mode === "fixed_times" && (
+          {task.recurrence?.mode === "fixed_times" && task.recurrence.frequency !== "monthly" && (
             <fieldset className="recurrence-time-editor">
               <legend>Fixed recurring times</legend>
-              <p>Each occurrence stays at its stated time. Change individual days to create or adjust an exception.</p>
-              <div>
-                {DAYS_OF_WEEK.map((day) => (
-                  <label key={day}>
-                    {SHORT_DAY_LABELS[day]}
-                    <input
-                      type="time"
-                      value={recurrenceTimeForDay(task.recurrence, day) ?? ""}
-                      aria-label={`${day} recurring time`}
-                      onChange={(event) =>
-                        updateRecurringTime(day, event.target.value)
-                      }
-                    />
-                  </label>
-                ))}
+              <p>Days can be off, use a different time, or contain multiple occurrences.</p>
+              <div className="recurrence-day-grid">
+                {DAYS_OF_WEEK.map((day) => {
+                  const times = recurrenceTimesForDay(task.recurrence, day);
+                  const totalTimes = task.recurrence?.timeRules?.reduce(
+                    (total, rule) => total + rule.daysOfWeek.length,
+                    0,
+                  ) ?? 0;
+                  return (
+                    <div className="recurrence-day-row" key={day}>
+                      <strong>{SHORT_DAY_LABELS[day]}</strong>
+                      <div>
+                        {times.length === 0 && addingTimeFor !== day && (
+                          <span className="recurrence-off">Off</span>
+                        )}
+                        {times.map((time) => (
+                          <span className="recurrence-time-control" key={time}>
+                            <input
+                              type="time"
+                              value={time}
+                              aria-label={`${day} recurring time`}
+                              onChange={(event) =>
+                                updateRecurringTime(day, time, event.target.value)
+                              }
+                            />
+                            <button
+                              type="button"
+                              disabled={totalTimes <= 1}
+                              aria-label={`Remove ${formatClockTime(time)} on ${day}`}
+                              onClick={() => updateRecurringTime(day, time, "")}
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))}
+                        {addingTimeFor === day ? (
+                          <input
+                            type="time"
+                            value=""
+                            autoFocus
+                            aria-label={`Add another ${day} time`}
+                            onBlur={() => setAddingTimeFor(undefined)}
+                            onChange={(event) =>
+                              addRecurringTime(day, event.target.value)
+                            }
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="recurrence-add-time"
+                            onClick={() => setAddingTimeFor(day)}
+                          >
+                            <Plus size={12} /> Time
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </fieldset>
           )}
+          {task.recurrence?.mode === "fixed_times" && task.recurrence.frequency === "monthly" && (
+            <fieldset className="recurrence-time-editor recurrence-monthly-editor">
+              <legend>Monthly recurring pattern</legend>
+              <p>{recurrenceSummary(task)}</p>
+              <span>To change the ordinal or date pattern, update the source wording and interpret it again.</span>
+            </fieldset>
+          )}
+          {task.recurrence?.dateOverrides?.length ? (
+            <fieldset className="recurrence-time-editor recurrence-exception-list">
+              <legend>One-date exceptions</legend>
+              <ul>
+                {task.recurrence.dateOverrides.map((override) => (
+                  <li key={override.date}>
+                    <strong>{shortDate(override.date)}</strong>
+                    <span>
+                      {override.skip
+                        ? "Skipped"
+                        : override.times?.map(formatClockTime).join(" and ")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </fieldset>
+          ) : null}
         </div>
       )}
       <div className="task-card-actions">

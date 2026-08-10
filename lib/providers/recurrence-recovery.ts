@@ -39,7 +39,17 @@ function mergeTimedRecurrence(
     },
     missingInformation: existing.missingInformation.filter(
       (item) => !/deadline|fixed (?:event )?(?:time|end)/i.test(item),
+    ).concat(
+      recovered.missingInformation.filter(
+        (item) =>
+          !existing.missingInformation.some(
+            (current) => current.toLocaleLowerCase() === item.toLocaleLowerCase(),
+          ),
+      ),
     ),
+    reviewRequired: existing.reviewRequired || recovered.reviewRequired,
+    approved:
+      existing.approved && !existing.reviewRequired && !recovered.reviewRequired,
   };
 }
 

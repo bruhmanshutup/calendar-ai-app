@@ -303,9 +303,13 @@ function buildTask(
   }
   if (fixed && !fixedEndAt) missingInformation.push("Fixed event end time");
   if (interpreted?.ambiguous) missingInformation.push("Clarify date or time");
+  if (timedRecurrence?.issues.length) {
+    missingInformation.push(...timedRecurrence.issues);
+  }
   const reviewRequired =
     (fixed && (!fixedStartAt || !fixedEndAt)) ||
     Boolean(interpreted?.ambiguous) ||
+    Boolean(timedRecurrence?.issues.length) ||
     estimate.confidence < 0.5;
   const week = count
     ? localWeekWindow(input.currentLocalDate, input.timeZone)
@@ -383,7 +387,10 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
     const ignoredStatements: ExtractionResult["ignoredStatements"] = [];
 
     lines.forEach((line, index) => {
-      const timedRecurrence = parseTimedRecurrence(line);
+      const timedRecurrence = parseTimedRecurrence(line, {
+        currentLocalDate: input.currentLocalDate,
+        timeZone: input.timeZone,
+      });
       const datePhrase = timedRecurrence ? undefined : extractDatePhrase(line);
       if (!isTaskCandidate(line, datePhrase)) {
         ignoredStatements.push({

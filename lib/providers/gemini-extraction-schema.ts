@@ -75,12 +75,22 @@ export const GEMINI_EXTRACTION_SCHEMA = {
           recurrence: {
             type: "object",
             properties: {
-              frequency: { type: "string", enum: ["daily", "weekly"] },
+              frequency: { type: "string", enum: ["daily", "weekly", "monthly"] },
               mode: {
                 type: "string",
                 enum: ["quota", "fixed_times"],
                 description:
                   "quota is a flexible occurrence count; fixed_times is a recurring schedule with exact per-day times.",
+              },
+              interval: { type: "integer", minimum: 1, maximum: 365 },
+              anchorDate: {
+                type: "string",
+                pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+              },
+              occurrenceLimit: {
+                type: "integer",
+                minimum: 1,
+                maximum: 10000,
               },
               count: { type: "integer", minimum: 1, maximum: 31 },
               daysOfWeek: {
@@ -102,9 +112,9 @@ export const GEMINI_EXTRACTION_SCHEMA = {
               timeRules: {
                 type: "array",
                 minItems: 1,
-                maxItems: 7,
+                maxItems: 28,
                 description:
-                  "Grouped local times for a fixed_times recurrence. A day must appear in at most one rule.",
+                  "Grouped local times for a fixed_times recurrence. A day may appear in multiple rules only for multiple daily occurrences.",
                 items: {
                   type: "object",
                   properties: {
@@ -132,6 +142,76 @@ export const GEMINI_EXTRACTION_SCHEMA = {
                     },
                   },
                   required: ["daysOfWeek", "time"],
+                },
+              },
+              monthlyRules: {
+                type: "array",
+                minItems: 1,
+                maxItems: 12,
+                items: {
+                  type: "object",
+                  properties: {
+                    type: {
+                      type: "string",
+                      enum: ["days_of_month", "ordinal_weekday", "last_day_of_month"],
+                    },
+                    daysOfMonth: {
+                      type: "array",
+                      minItems: 1,
+                      maxItems: 31,
+                      items: { type: "integer", minimum: 1, maximum: 31 },
+                    },
+                    ordinal: {
+                      type: "integer",
+                      enum: [1, 2, 3, 4, 5, -1],
+                    },
+                    dayOfWeek: {
+                      type: "string",
+                      enum: [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday",
+                        "saturday",
+                        "sunday",
+                      ],
+                    },
+                    times: {
+                      type: "array",
+                      minItems: 1,
+                      maxItems: 8,
+                      items: {
+                        type: "string",
+                        pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                      },
+                    },
+                  },
+                  required: ["type", "times"],
+                },
+              },
+              dateOverrides: {
+                type: "array",
+                maxItems: 50,
+                items: {
+                  type: "object",
+                  properties: {
+                    date: {
+                      type: "string",
+                      pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+                    },
+                    skip: { type: "boolean" },
+                    times: {
+                      type: "array",
+                      minItems: 1,
+                      maxItems: 8,
+                      items: {
+                        type: "string",
+                        pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                      },
+                    },
+                  },
+                  required: ["date"],
                 },
               },
               windowStart: { type: "string", format: "date-time" },
