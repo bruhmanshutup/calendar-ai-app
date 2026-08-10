@@ -82,6 +82,7 @@ type PlanPilotContextValue = {
 const Context = createContext<PlanPilotContextValue | null>(null);
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
+const CURRENT_SCHEDULER_VERSION = 2;
 
 function currentLocalDate(timeZone: string, instant = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -98,10 +99,32 @@ function currentLocalDate(timeZone: string, instant = new Date()): string {
 
 function schedulingBase(
   planningMode: PlanningMode,
+  tasks: ExtractedTask[] = [],
   lockedSessions: ExistingSession[] = [],
 ): Omit<SchedulingInput, "tasks"> {
   const now = new Date(Math.ceil(Date.now() / (15 * MINUTE)) * 15 * MINUTE);
-  const availability = Array.from({ length: 8 }, (_, index) => {
+  const latestRelevantDate = tasks.reduce((latest, task) => {
+    const values = [
+      task.dueAt,
+      task.fixedStartAt,
+      task.recurrence?.windowEnd,
+      task.dueDate
+        ? fromZonedTime(
+            `${task.dueDate}T${DEFAULT_PREFERENCES.sleepingTime}:00`,
+            DEFAULT_PREFERENCES.timeZone,
+          ).toISOString()
+        : undefined,
+    ]
+      .filter((value): value is string => !!value)
+      .map((value) => new Date(value).getTime())
+      .filter(Number.isFinite);
+    return Math.max(latest, ...values);
+  }, now.getTime() + 7 * DAY);
+  const horizonDays = Math.min(
+    35,
+    Math.max(8, Math.ceil((latestRelevantDate - now.getTime()) / DAY) + 1),
+  );
+  const availability = Array.from({ length: horizonDays }, (_, index) => {
     const date = currentLocalDate(
       DEFAULT_PREFERENCES.timeZone,
       new Date(now.getTime() + index * DAY),
@@ -138,7 +161,7 @@ function scheduleFor(
   planningMode: PlanningMode,
 ): ScheduleProposal {
   return generateSchedule({
-    ...schedulingBase(planningMode),
+    ...schedulingBase(planningMode, tasks),
     tasks: tasks.filter((task) => !task.completed && !task.cancelled),
   });
 }
@@ -218,7 +241,15 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         if (active && body.state) {
           const saved = parsePersistedWorkspace(body.state);
           setTasks(saved.tasks);
-          setProposal(saved.proposal);
+          const hasCommittedSessions = saved.proposal.sessions.some(
+            (session) => session.status !== "proposed",
+          );
+          setProposal(
+            saved.schedulerVersion === CURRENT_SCHEDULER_VERSION ||
+              hasCommittedSessions
+              ? saved.proposal
+              : scheduleFor(saved.tasks, saved.planningMode),
+          );
           setImportText(saved.importText);
           setHistory(saved.history);
           setSessionReviews(saved.sessionReviews);
@@ -248,6 +279,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           state: {
             version: 1,
+            schedulerVersion: CURRENT_SCHEDULER_VERSION,
             tasks,
             proposal,
             importText,
@@ -427,7 +459,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           setToast("Locked sessions must be unlocked before they can move.");
           return current;
         }
-        const base = schedulingBase(planningMode);
+        const base = schedulingBase(planningMode, tasks);
         const increment = 15 * MINUTE;
         const duration =
           new Date(target.end).getTime() - new Date(target.start).getTime();
@@ -620,7 +652,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
             minutesCompleted: completedMinutes,
             sessions: existing,
             task,
-            scheduling: schedulingBase(planningMode),
+            scheduling: schedulingBase(planningMode, tasks),
           }),
         );
       } else {

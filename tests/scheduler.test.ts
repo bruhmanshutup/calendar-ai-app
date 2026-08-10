@@ -29,6 +29,79 @@ describe("deterministic scheduling", () => {
     ).toBe(true);
   });
 
+  it("places overdue work in the earliest valid opening", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "overdue",
+          title: "Overdue orientation task",
+          dueDate: "2026-07-26",
+          estimatedMinutes: 45,
+          priority: "urgent",
+        }),
+      ]),
+    );
+    const session = proposal.sessions.find((item) => item.taskId === "overdue");
+
+    expect(session?.start).toBe("2026-07-27T08:00:00.000Z");
+    expect(session?.reasonCodes).toContain("OVERDUE_RECOVERY");
+    expect(proposal.unschedulable).toHaveLength(0);
+  });
+
+  it("schedules overdue work before future work when capacity is tight", () => {
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "future",
+            title: "Future task",
+            dueDate: "2026-07-31",
+            estimatedMinutes: 45,
+          }),
+          task({
+            id: "overdue-first",
+            title: "Overdue task",
+            dueDate: "2026-07-26",
+            estimatedMinutes: 45,
+            priority: "urgent",
+          }),
+        ],
+        {
+          availability: [
+            { start: "2026-07-27T08:00:00.000Z", end: "2026-07-27T09:30:00.000Z" },
+          ],
+        },
+      ),
+    );
+
+    expect(proposal.sessions.map((session) => session.taskId)).toContain(
+      "overdue-first",
+    );
+    expect(proposal.sessions.map((session) => session.taskId)).not.toContain(
+      "future",
+    );
+  });
+
+  it("distributes same-deadline tasks across reasonable days", () => {
+    const tasks = Array.from({ length: 6 }, (_, index) =>
+      task({
+        id: `august-task-${index + 1}`,
+        title: `August task ${index + 1}`,
+        dueDate: "2026-07-31",
+        estimatedMinutes: 45,
+      }),
+    );
+    const proposal = generateSchedule(scheduling(tasks));
+    const dates = new Set(
+      proposal.sessions
+        .filter((session) => session.taskId.startsWith("august-task-"))
+        .map((session) => session.start.slice(0, 10)),
+    );
+
+    expect(dates.size).toBeGreaterThanOrEqual(3);
+    expect(proposal.unschedulable).toHaveLength(0);
+  });
+
   it("respects waking and sleeping boundaries", () => {
     const proposal = generateSchedule(
       scheduling(
@@ -41,8 +114,14 @@ describe("deterministic scheduling", () => {
         },
       ),
     );
-    expect(proposal.sessions.find((session) => session.taskId === "sleep")?.start)
-      .toBe("2026-07-27T08:00:00.000Z");
+    const session = proposal.sessions.find((item) => item.taskId === "sleep");
+    expect(session).toBeDefined();
+    expect(new Date(session!.start).getTime()).toBeGreaterThanOrEqual(
+      new Date("2026-07-27T08:00:00.000Z").getTime(),
+    );
+    expect(new Date(session!.end).getTime()).toBeLessThanOrEqual(
+      new Date("2026-07-27T10:00:00.000Z").getTime(),
+    );
   });
 
   it.each([
@@ -249,4 +328,3 @@ describe("deterministic scheduling", () => {
     expect(proposal.sessions.filter((session) => session.taskId === "weekend")).toHaveLength(0);
   });
 });
-

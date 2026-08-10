@@ -1,6 +1,8 @@
 import type { ScheduleReasonCode } from "./types";
 
 const EXPLANATIONS: Record<ScheduleReasonCode, string> = {
+  OVERDUE_RECOVERY:
+    "Placed in the earliest practical opening because its deadline has already passed.",
   DEADLINE_RISK: "Scheduled early because this task has high deadline risk.",
   PREFERRED_FOCUS_WINDOW: "Placed during your preferred focus period.",
   PREFERRED_ROUTINE_WINDOW: "Placed during your preferred routine window.",
@@ -20,4 +22,3 @@ const EXPLANATIONS: Record<ScheduleReasonCode, string> = {
 export function explainReasons(reasons: ScheduleReasonCode[]): string {
   return reasons.map((reason) => EXPLANATIONS[reason]).join(" ");
 }
-

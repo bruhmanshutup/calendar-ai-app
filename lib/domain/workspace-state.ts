@@ -95,6 +95,7 @@ const sessionReviewSchema = z.object({
 
 export const persistedWorkspaceSchema = z.object({
   version: z.literal(1),
+  schedulerVersion: z.number().int().positive().optional(),
   tasks: z.array(extractedTaskSchema).max(250),
   proposal: scheduleProposalSchema,
   importText: z.string().max(100_000),
@@ -107,6 +108,7 @@ export const persistedWorkspaceSchema = z.object({
 
 export type PersistedWorkspace = {
   version: 1;
+  schedulerVersion?: number;
   tasks: z.infer<typeof extractedTaskSchema>[];
   proposal: ScheduleProposal;
   importText: string;

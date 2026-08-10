@@ -115,7 +115,7 @@ function isWithinWakingHours(
   });
 }
 
-function taskDeadline(
+function statedTaskDeadline(
   task: ExtractedTask,
   input: SchedulingInput,
 ): number {
@@ -133,6 +133,17 @@ function taskDeadline(
     return new Date(task.recurrence.windowEnd).getTime();
   }
   return new Date(input.windowEnd).getTime();
+}
+
+function isOverdueTask(task: ExtractedTask, input: SchedulingInput): boolean {
+  if (!task.dueAt && !task.dueDate) return false;
+  return statedTaskDeadline(task, input) < new Date(input.windowStart).getTime();
+}
+
+function taskDeadline(task: ExtractedTask, input: SchedulingInput): number {
+  return isOverdueTask(task, input)
+    ? new Date(input.windowEnd).getTime()
+    : statedTaskDeadline(task, input);
 }
 
 function availableCapacityBefore(
@@ -162,6 +173,9 @@ function taskRisk(
   busy: NumericInterval[],
 ): number {
   const minutes = task.estimatedMinutes ?? 0;
+  if (isOverdueTask(task, input)) {
+    return 100_000 + minutes + PRIORITY_WEIGHT[task.priority];
+  }
   const deadline = taskDeadline(task, input);
   const capacity = Math.max(
     1,
@@ -193,7 +207,11 @@ function candidateReasons(
   const routineMatch = input.preferences.preferredRoutineWindows.some(
     (window) => isInClockWindow(localMinute, window),
   );
-  if (deadline - candidateEnd <= 24 * 60 * MINUTE) reasons.push("DEADLINE_RISK");
+  if (isOverdueTask(task, input)) {
+    reasons.push("OVERDUE_RECOVERY");
+  } else if (deadline - candidateEnd <= 24 * 60 * MINUTE) {
+    reasons.push("DEADLINE_RISK");
+  }
   if (focusMatch && task.energyDemand === "high") {
     reasons.push("PREFERRED_FOCUS_WINDOW");
   }
@@ -220,7 +238,7 @@ function candidateScore(
   start: number,
   deadline: number,
   input: SchedulingInput,
-  taskSessions: PlannedSession[],
+  sessions: PlannedSession[],
 ): number {
   const mode = PLANNING_MODE_CONFIG[input.preferences.planningMode];
   const local = localParts(start, input.preferences.timeZone);
@@ -230,24 +248,63 @@ function candidateScore(
   const routineMatch = input.preferences.preferredRoutineWindows.some(
     (window) => isInClockWindow(local.minutes, window),
   );
-  const sameDayOccurrences = taskSessions.filter(
+  const sameDaySessions = sessions.filter(
     (session) =>
       localParts(
         new Date(session.start).getTime(),
         input.preferences.timeZone,
       ).date === local.date,
+  );
+  const sameTaskDayOccurrences = sameDaySessions.filter(
+    (session) => session.taskId === task.id,
   ).length;
-  const minutesUntilDeadline = Math.max(1, (deadline - start) / MINUTE);
+  const sameDayMinutes = sameDaySessions.reduce(
+    (total, session) => total + session.minutes,
+    0,
+  );
+  const windowStart = new Date(input.windowStart).getTime();
+  const windowEnd = new Date(input.windowEnd).getTime();
+
+  if (isOverdueTask(task, input)) {
+    return (
+      1_000_000 -
+      (start - windowStart) / MINUTE -
+      sameDayMinutes * 0.5 -
+      sameTaskDayOccurrences * 30
+    );
+  }
+
+  const targetFraction = task.dueAt || task.dueDate
+    ? task.priority === "urgent"
+      ? 0.2
+      : task.priority === "high"
+        ? 0.3
+        : task.priority === "medium"
+          ? 0.45
+          : 0.6
+    : 0.25;
+  const targetDeadline = Math.min(deadline, windowEnd);
+  const targetStart =
+    windowStart + Math.max(0, targetDeadline - windowStart) * targetFraction;
+  const distanceFromTargetHours = Math.abs(start - targetStart) / (60 * MINUTE);
+  const distributionWeight =
+    input.preferences.planningMode === "conservative"
+      ? 1
+      : input.preferences.planningMode === "balanced"
+        ? 0.8
+        : 0.55;
   let score =
     PRIORITY_WEIGHT[task.priority] +
-    80_000 / minutesUntilDeadline +
+    -distanceFromTargetHours * 1.5 -
+    (sameDayMinutes * 0.45 + sameDaySessions.length * 20) *
+      distributionWeight -
+    sameTaskDayOccurrences * 80 +
     mode.earlyCompletionWeight *
       (1 -
-        (start - new Date(input.windowStart).getTime()) /
+        (start - windowStart) /
           Math.max(
             1,
-            new Date(input.windowEnd).getTime() -
-              new Date(input.windowStart).getTime(),
+            windowEnd - windowStart,
           ));
 
   if (task.energyDemand === "high") score += focusMatch ? 38 : -22;
@@ -256,7 +313,9 @@ function candidateScore(
   }
   if (task.category === "errand" && focusMatch) score -= 30;
   if (task.energyDemand === "low" && !focusMatch) score += 12;
-  if (task.taskType === "recurring_goal") score -= sameDayOccurrences * 70;
+  if (task.taskType === "recurring_goal") {
+    score -= sameTaskDayOccurrences * 70;
+  }
   score += mode.densityWeight;
   return score;
 }
@@ -342,7 +401,7 @@ function findCandidate(
       candidates.push({
         start,
         end,
-        score: candidateScore(task, start, deadline, input, taskSessions),
+        score: candidateScore(task, start, deadline, input, sessions),
         reasons: [...new Set(reasons)],
       });
     }

@@ -88,6 +88,7 @@ const APP_NAV: Array<{
 ];
 
 const REASON_LABELS: Record<ScheduleReasonCode, string> = {
+  OVERDUE_RECOVERY: "Overdue recovery",
   DEADLINE_RISK: "Deadline risk",
   PREFERRED_FOCUS_WINDOW: "Focus window",
   PREFERRED_ROUTINE_WINDOW: "Routine window",
@@ -1323,9 +1324,17 @@ export function ScheduleSessionCard({
   );
 }
 
-function scheduleColumns() {
+function scheduleColumns(sessions: PlannedSession[]) {
   const base = new Date(`${localDateKey()}T12:00:00Z`);
-  return Array.from({ length: 5 }, (_, offset) => {
+  const latest = sessions.reduce((value, session) => {
+    const date = new Date(`${localDateKey(new Date(session.start))}T12:00:00Z`);
+    return date > value ? date : value;
+  }, base);
+  const visibleDays = Math.min(
+    35,
+    Math.max(5, Math.round((latest.getTime() - base.getTime()) / (24 * 60 * 60_000)) + 1),
+  );
+  return Array.from({ length: visibleDays }, (_, offset) => {
     const date = new Date(base);
     date.setUTCDate(base.getUTCDate() + offset);
     const key = date.toISOString().slice(0, 10);
@@ -1351,7 +1360,7 @@ function ScheduleView() {
   } = usePlanPilot();
   const [mode, setMode] = useState<"week" | "list">("week");
   const [showReasons, setShowReasons] = useState(true);
-  const weekColumns = scheduleColumns();
+  const weekColumns = scheduleColumns(proposal.sessions);
   const approveSelected = () => selectedSessionIds.forEach(approveSession);
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1383,7 +1392,7 @@ function ScheduleView() {
     <>
       <PageHeading
         eyebrow="PROPOSED SCHEDULE · VERSION 3"
-        title="A realistic plan for the week."
+        title="A realistic plan for the weeks ahead."
         detail="Drag unlocked sessions, request another time, or approve only what works. Invalid placements are rejected."
         actions={
           <>
@@ -1397,7 +1406,7 @@ function ScheduleView() {
       <PlanHealthPanel compact />
       <div className="schedule-toolbar">
         <div className="view-toggle">
-          <button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}><CalendarDays size={15} /> Week</button>
+          <button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}><CalendarDays size={15} /> Timeline</button>
           <button className={mode === "list" ? "active" : ""} onClick={() => setMode("list")}><LayoutList size={15} /> Task list</button>
         </div>
         <label className="inline-check">
@@ -1407,7 +1416,10 @@ function ScheduleView() {
         <span className="schedule-range">{weekColumns[0].range} – {weekColumns.at(-1)?.range}</span>
       </div>
       {mode === "week" ? (
-        <div className={`week-board ${showReasons ? "" : "hide-reasons"}`}>
+        <div
+          className={`week-board ${showReasons ? "" : "hide-reasons"}`}
+          style={{ gridTemplateColumns: `repeat(${weekColumns.length}, minmax(180px, 1fr))` }}
+        >
           {weekColumns.map((day) => {
             const sessions = proposal.sessions.filter(
               (session) =>

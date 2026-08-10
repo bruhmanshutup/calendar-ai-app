@@ -121,6 +121,7 @@ export type ExistingSession = {
 };
 
 export type ScheduleReasonCode =
+  | "OVERDUE_RECOVERY"
   | "DEADLINE_RISK"
   | "PREFERRED_FOCUS_WINDOW"
   | "PREFERRED_ROUTINE_WINDOW"
