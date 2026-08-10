@@ -177,6 +177,28 @@ describe("common exact recurrence wording", () => {
     );
   });
 
+  it("parses an alternating workout range starting from a relative weekday", () => {
+    const parsed = parseTimedRecurrence(
+      "Work out on alternating days starting from this Monday from 6-7AM",
+      context,
+    );
+
+    expect(parsed).toMatchObject({
+      titleSource: "Work out",
+      issues: [],
+      recurrence: {
+        frequency: "daily",
+        mode: "fixed_times",
+        interval: 2,
+        anchorDate: "2026-08-10",
+        windowStart: "2026-08-10T07:00:00.000Z",
+      },
+    });
+    expect(parsed?.recurrence.timeRules).toEqual([
+      { daysOfWeek: DAYS_OF_WEEK, time: "06:00" },
+    ]);
+  });
+
   it("preserves explicit start, duration, end, and occurrence limits", () => {
     const duration = parseTimedRecurrence(
       "Take medication every day at 8 AM for 2 weeks starting August 10, 2026.",

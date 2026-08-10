@@ -213,6 +213,7 @@ export type UnschedulableTask = {
 export type SchedulingInput = {
   windowStart: string;
   windowEnd: string;
+  allowExplicitTimesOutsideAvailability?: boolean;
   tasks: ExtractedTask[];
   preferences: SchedulingPreferences;
   availability: TimeInterval[];

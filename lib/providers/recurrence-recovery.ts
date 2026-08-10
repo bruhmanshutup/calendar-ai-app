@@ -23,6 +23,7 @@ function mergeTimedRecurrence(
   recovered: ExtractedTask,
 ): ExtractedTask {
   if (existing.recurrence?.mode === "fixed_times") return existing;
+  const recoveredStatedEffort = recovered.effortEstimateSource === "stated";
   return {
     ...existing,
     taskType: "recurring_goal",
@@ -31,11 +32,26 @@ function mergeTimedRecurrence(
     dueAt: undefined,
     fixedStartAt: undefined,
     fixedEndAt: undefined,
+    estimatedMinutes: recoveredStatedEffort
+      ? recovered.estimatedMinutes
+      : existing.estimatedMinutes,
+    minimumSessionMinutes: recoveredStatedEffort
+      ? recovered.minimumSessionMinutes
+      : existing.minimumSessionMinutes,
+    effortEstimateSource: recoveredStatedEffort
+      ? recovered.effortEstimateSource
+      : existing.effortEstimateSource,
+    effortEstimateRationale: recoveredStatedEffort
+      ? recovered.effortEstimateRationale
+      : existing.effortEstimateRationale,
     recurrence: recovered.recurrence,
     fieldConfidence: {
       ...existing.fieldConfidence,
       taskType: 0.98,
       recurrence: 0.98,
+      estimatedMinutes: recoveredStatedEffort
+        ? recovered.fieldConfidence.estimatedMinutes
+        : existing.fieldConfidence.estimatedMinutes,
     },
     missingInformation: existing.missingInformation.filter(
       (item) => !/deadline|fixed (?:event )?(?:time|end)/i.test(item),

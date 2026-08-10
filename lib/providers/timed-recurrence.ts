@@ -20,7 +20,7 @@ const TIME_LIST = `${EXACT_TIME}(?:\\s*(?:,|and|&)\\s*(?:at\\s+)?${EXACT_TIME})*
 const MONTH_NAME =
   "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
 const DATE_EXPRESSION =
-  `(?:\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|${MONTH_NAME}\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?|\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH_NAME}(?:,?\\s+\\d{4})?)`;
+  `(?:\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|${MONTH_NAME}\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?|\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH_NAME}(?:,?\\s+\\d{4})?|(?:(?:this|next)\\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))`;
 
 const DAY_ALIASES: Array<[RegExp, DayOfWeek]> = [
   [/^mons?$/i, "monday"],
@@ -147,6 +147,7 @@ function parseTimes(value: string): string[] {
 function hasRecurringCue(text: string, clauseCount: number): boolean {
   return (
     clauseCount > 1 ||
+    /\b(?:on\s+)?alternat(?:e|ing)\s+days?\b/i.test(text) ||
     /\b(?:daily|weekly|monthly|each\s+day|every\s+(?:other\s+|\d+\s+)?(?:day|week|month)|weekdays?|weekends?)\b/i.test(
       text,
     ) ||
@@ -206,7 +207,9 @@ function intradayIntervalClause(text: string): ScheduleClause | undefined {
       `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`,
     );
   }
-  const parsedDays = parseDays(text);
+  const parsedDays = /\b(?:on\s+)?alternat(?:e|ing)\s+days?\b/i.test(text)
+    ? [...DAYS_OF_WEEK]
+    : parseDays(text);
   return {
     start: match.index,
     end: match.index + match[0].length,
@@ -216,10 +219,39 @@ function intradayIntervalClause(text: string): ScheduleClause | undefined {
   };
 }
 
+function recurringClockRangeClause(text: string): ScheduleClause | undefined {
+  if (/\bevery\s+\d+\s+hours?\s+(?:from|starting\s+at)\b/i.test(text)) {
+    return undefined;
+  }
+  const match = /\bfrom\s+(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)\s*(?:-|to)\s*(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?))\b/i.exec(
+    text,
+  );
+  if (!match) return undefined;
+  const endMeridiem = /(a\.?m\.?|p\.?m\.?)\s*$/i.exec(match[2])?.[1];
+  const startText = /(?:a\.?m\.?|p\.?m\.?)\s*$/i.test(match[1])
+    ? match[1]
+    : `${match[1]}${endMeridiem ?? ""}`;
+  const startTime = toTwentyFourHourTime(startText);
+  if (!startTime) return undefined;
+  const parsedDays = /\b(?:on\s+)?alternat(?:e|ing)\s+days?\b/i.test(text)
+    ? [...DAYS_OF_WEEK]
+    : parseDays(text);
+  return {
+    start: match.index,
+    end: match.index + match[0].length,
+    days: parsedDays.length ? parsedDays : [...DAYS_OF_WEEK],
+    times: [startTime],
+    override: false,
+  };
+}
+
 function findInterval(text: string): {
   frequency?: "daily" | "weekly" | "monthly";
   interval: number;
 } {
+  if (/\b(?:on\s+)?alternat(?:e|ing)\s+days?\b/i.test(text)) {
+    return { frequency: "daily", interval: 2 };
+  }
   const match = /\bevery\s+(other|\d+)\s+(days?|weeks?|months?)\b/i.exec(text);
   if (!match) return { interval: 1 };
   const interval = match[1].toLocaleLowerCase() === "other" ? 2 : Number(match[1]);
@@ -262,7 +294,7 @@ function recurrenceBounds(
   issues: string[],
 ): { anchorDate?: string; windowStart?: string; windowEnd?: string } {
   const start = new RegExp(
-    `\\b(?:starting|beginning|from)\\s+(?:on\\s+)?(${DATE_EXPRESSION})\\b`,
+    `\\b(?:starting(?:\\s+from)?|beginning|from)\\s+(?:on\\s+)?(${DATE_EXPRESSION})\\b`,
     "i",
   ).exec(text);
   const until = new RegExp(`\\buntil\\s+(?:on\\s+)?(${DATE_EXPRESSION})\\b`, "i").exec(
@@ -367,7 +399,7 @@ function dateOverrides(
 
 function cleanTitleSource(text: string): string {
   const marker = new RegExp(
-    `\\b(?:daily|weekly|monthly|each\\s+day|every\\s+(?:(?:other|\\d+)\\s+)?(?:day|week|month)|every\\s+\\d+\\s+hours?|(?:once|twice|\\d+\\s+times)\\s+(?:a|per)\\s+day|(?:school|work|shift)\\s*days?|\\d+\\s+days?\\s+on|weekdays?|weekends?|${DAY_NAME})\\b`,
+    `\\b(?:daily|weekly|monthly|each\\s+day|alternat(?:e|ing)\\s+days?|every\\s+(?:(?:other|\\d+)\\s+)?(?:day|week|month)|every\\s+\\d+\\s+hours?|(?:once|twice|\\d+\\s+times)\\s+(?:a|per)\\s+day|(?:school|work|shift)\\s*days?|\\d+\\s+days?\\s+on|weekdays?|weekends?|${DAY_NAME})\\b`,
     "i",
   ).exec(text);
   if (marker && marker.index > 0) {
@@ -586,9 +618,11 @@ export function parseTimedRecurrence(
   if (monthly) return monthly;
 
   const intraday = intradayIntervalClause(text);
+  const clockRange = recurringClockRangeClause(text);
   const clauses = [
     ...scheduleClauses(text),
     ...(intraday ? [intraday] : []),
+    ...(clockRange ? [clockRange] : []),
   ];
   if (!hasRecurringCue(text, clauses.length)) return undefined;
   const issues = ambiguousScheduleIssues(text);

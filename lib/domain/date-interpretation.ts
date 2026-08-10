@@ -151,11 +151,11 @@ export function resolveRelativeDate(
   }
   const current = parse(currentLocalDate, "yyyy-MM-dd", new Date());
 
-  const weekdayMatch = /^(next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+at\s+(.+))?$/.exec(
+  const weekdayMatch = /^(?:(next|this)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+at\s+(.+))?$/.exec(
     normalized,
   );
   if (weekdayMatch) {
-    const isNext = Boolean(weekdayMatch[1]);
+    const isNext = weekdayMatch[1] === "next";
     const weekday = weekdayMatch[2];
     const targetIndex = WEEKDAY_INDEX[weekday];
     const currentIndex = getDay(current);

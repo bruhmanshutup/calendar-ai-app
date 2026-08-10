@@ -592,6 +592,87 @@ describe("deterministic scheduling", () => {
     ).toEqual(["2026-08-10", "2026-08-12", "2026-08-14", "2026-08-16"]);
   });
 
+  it("honors an explicit early routine outside preferred waking hours", () => {
+    const dates = [
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-15",
+      "2026-08-16",
+    ];
+    const workout = task({
+      id: "early-alternating-workout",
+      title: "Work out",
+      taskType: "recurring_goal",
+      category: "fitness",
+      estimatedMinutes: 60,
+      recurrence: {
+        frequency: "daily",
+        mode: "fixed_times",
+        interval: 2,
+        anchorDate: "2026-08-10",
+        daysOfWeek: [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday",
+          "saturday",
+          "sunday",
+        ],
+        timeRules: [{
+          daysOfWeek: [
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+          ],
+          time: "06:00",
+        }],
+      },
+    });
+    const basePatch = {
+      windowStart: "2026-08-10T00:00:00.000Z",
+      windowEnd: "2026-08-17T00:00:00.000Z",
+      allowExplicitTimesOutsideAvailability: true,
+      availability: dates.map((date) => ({
+        start: `${date}T07:00:00.000Z`,
+        end: `${date}T23:00:00.000Z`,
+      })),
+    };
+    const proposal = generateSchedule(scheduling([workout], basePatch));
+
+    expect(
+      proposal.sessions.map((session) => session.start),
+    ).toEqual([
+      "2026-08-10T06:00:00.000Z",
+      "2026-08-12T06:00:00.000Z",
+      "2026-08-14T06:00:00.000Z",
+      "2026-08-16T06:00:00.000Z",
+    ]);
+    expect(proposal.unschedulable).toHaveLength(0);
+
+    const withCalendarConflict = generateSchedule(
+      scheduling([workout], {
+        ...basePatch,
+        unavailableEvents: [{
+          start: "2026-08-12T06:00:00.000Z",
+          end: "2026-08-12T07:00:00.000Z",
+        }],
+      }),
+    );
+    expect(withCalendarConflict.sessions).toHaveLength(3);
+    expect(withCalendarConflict.unschedulable[0]).toMatchObject({
+      reasonCode: "FIXED_TIME_CONFLICT",
+      unscheduledMinutes: 60,
+    });
+  });
+
   it("stops a fixed recurrence at its explicit occurrence limit", () => {
     const dates = ["2026-08-10", "2026-08-11", "2026-08-12"];
     const proposal = generateSchedule(

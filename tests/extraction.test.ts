@@ -269,6 +269,79 @@ describe("extraction validation and mock interpretation", () => {
     });
   });
 
+  it("keeps an alternating workout time range as one anchored routine", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      currentLocalDate: "2026-08-09",
+      timeZone: "America/Los_Angeles",
+      text: "Work out on alternating days starting from this Monday from 6-7AM",
+    });
+
+    expect(result.tasks[0]).toMatchObject({
+      title: "Work out",
+      taskType: "recurring_goal",
+      estimatedMinutes: 60,
+      effortEstimateSource: "stated",
+      reviewRequired: false,
+      recurrence: {
+        frequency: "daily",
+        mode: "fixed_times",
+        interval: 2,
+        anchorDate: "2026-08-10",
+        timeRules: [{ daysOfWeek: [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday",
+          "saturday",
+          "sunday",
+        ], time: "06:00" }],
+      },
+    });
+  });
+
+  it("repairs a fixed-event AI interpretation of the alternating workout", async () => {
+    const source =
+      "Work out on alternating days starting from this Monday from 6-7AM";
+    const result = await recoverTimedRecurrences(
+      {
+        currentLocalDate: "2026-08-09",
+        timeZone: "America/Los_Angeles",
+        text: source,
+      },
+      {
+        tasks: [
+          task({
+            id: "misread-workout",
+            title: "Work out",
+            sourceText: source,
+            taskType: "fixed_time",
+            fixedStartAt: "2026-08-10T06:00:00.000-07:00",
+            fixedEndAt: "2026-08-10T10:00:00.000-07:00",
+            estimatedMinutes: 240,
+            minimumSessionMinutes: 240,
+            effortEstimateSource: "ai",
+          }),
+        ],
+        ignoredStatements: [],
+      },
+    );
+
+    expect(result.tasks[0]).toMatchObject({
+      taskType: "recurring_goal",
+      fixedStartAt: undefined,
+      fixedEndAt: undefined,
+      estimatedMinutes: 60,
+      minimumSessionMinutes: 60,
+      effortEstimateSource: "stated",
+      recurrence: {
+        mode: "fixed_times",
+        interval: 2,
+        anchorDate: "2026-08-10",
+      },
+    });
+  });
+
   it("keeps a split daily recurrence as one timed routine", async () => {
     const source =
       "Take medication every day at 8 AM, but Tuesdays and Thursdays at 10 AM.";

@@ -65,6 +65,19 @@ function isInside(
   );
 }
 
+function explicitTimeIsAllowed(
+  candidate: NumericInterval,
+  input: SchedulingInput,
+  availability: NumericInterval[],
+): boolean {
+  if (isInside(candidate, availability)) return true;
+  if (!input.allowExplicitTimesOutsideAvailability) return false;
+  return (
+    candidate.start >= new Date(input.windowStart).getTime() &&
+    candidate.end <= new Date(input.windowEnd).getTime()
+  );
+}
+
 function isFree(
   candidate: NumericInterval,
   busy: NumericInterval[],
@@ -802,7 +815,7 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       if (
         !Number.isFinite(start) ||
         !Number.isFinite(end) ||
-        !isInside(slot, availability) ||
+        !explicitTimeIsAllowed(slot, input, availability) ||
         !isFree(slot, busy)
       ) {
         unschedulableTasks.push(
@@ -834,7 +847,10 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       let conflictedMinutes = 0;
       for (const [index, slot] of occurrences.entries()) {
         const minutes = intervalMinutes(slot);
-        if (!isInside(slot, availability) || !isFree(slot, busy)) {
+        if (
+          !explicitTimeIsAllowed(slot, input, availability) ||
+          !isFree(slot, busy)
+        ) {
           conflictedMinutes += minutes;
           continue;
         }

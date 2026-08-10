@@ -36,6 +36,27 @@ const NUMBER_WORDS: Record<string, number> = {
   seven: 7,
 };
 
+function clockRangeMinutes(text: string): number | undefined {
+  const match = /\bfrom\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i.exec(
+    text,
+  );
+  if (!match) return undefined;
+  const meridiem = (match[3] ?? match[6]).toLocaleLowerCase();
+  const asMinutes = (hourText: string, minuteText: string | undefined, period: string) => {
+    let hour = Number(hourText);
+    const minute = Number(minuteText ?? 0);
+    if (hour < 1 || hour > 12 || minute > 59) return undefined;
+    if (period === "am" && hour === 12) hour = 0;
+    if (period === "pm" && hour !== 12) hour += 12;
+    return hour * 60 + minute;
+  };
+  const start = asMinutes(match[1], match[2], match[3]?.toLocaleLowerCase() ?? meridiem);
+  const end = asMinutes(match[4], match[5], match[6].toLocaleLowerCase());
+  if (start === undefined || end === undefined) return undefined;
+  const duration = end > start ? end - start : end + 24 * 60 - start;
+  return duration > 0 && duration <= 12 * 60 ? duration : undefined;
+}
+
 function estimateMinutes(text: string): {
   minutes: number;
   confidence: number;
@@ -43,6 +64,16 @@ function estimateMinutes(text: string): {
   source: "stated" | "heuristic";
   rationale: string;
 } {
+  const rangeMinutes = clockRangeMinutes(text);
+  if (rangeMinutes) {
+    return {
+      minutes: rangeMinutes,
+      confidence: 0.98,
+      assumed: false,
+      source: "stated",
+      rationale: "Used the start and end times stated for each occurrence.",
+    };
+  }
   const hours = /(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i.exec(text);
   if (hours) {
     return {
