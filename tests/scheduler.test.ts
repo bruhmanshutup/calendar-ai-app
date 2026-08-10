@@ -261,6 +261,53 @@ describe("deterministic scheduling", () => {
     expect(proposal.unschedulable[0]?.unscheduledMinutes).toBe(45);
   });
 
+  it("starts inside the recurrence window and preserves alternating rest days", () => {
+    const availability = [
+      "2026-07-27",
+      "2026-07-28",
+      "2026-07-29",
+      "2026-07-30",
+      "2026-07-31",
+      "2026-08-01",
+      "2026-08-02",
+    ].map((date) => ({
+      start: `${date}T08:00:00.000Z`,
+      end: `${date}T20:00:00.000Z`,
+    }));
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "alternating-workout",
+            title: "Work out",
+            taskType: "recurring_goal",
+            category: "fitness",
+            estimatedMinutes: 60,
+            minimumSessionMinutes: 30,
+            recurrence: {
+              frequency: "daily",
+              mode: "quota",
+              interval: 2,
+              count: 3,
+              windowStart: "2026-07-28T00:00:00.000Z",
+              windowEnd: "2026-08-02T23:59:59.000Z",
+            },
+          }),
+        ],
+        {
+          windowEnd: "2026-08-02T23:59:59.000Z",
+          availability,
+        },
+      ),
+    );
+    const dates = proposal.sessions
+      .filter((session) => session.taskId === "alternating-workout")
+      .map((session) => session.start.slice(0, 10));
+
+    expect(dates).toEqual(["2026-07-28", "2026-07-30", "2026-08-01"]);
+    expect(proposal.unschedulable).toHaveLength(0);
+  });
+
   it("expands a split daily recurrence at its exact per-day times", () => {
     const availability = [
       "2026-07-27",

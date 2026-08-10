@@ -1,7 +1,9 @@
 import {
+  addWeeks,
   addHours,
   differenceInCalendarDays,
   endOfWeek,
+  format,
   parseISO,
   startOfWeek,
 } from "date-fns";
@@ -71,7 +73,7 @@ function estimateMinutes(text: string): {
       rationale: "Used a conservative local estimate for substantial focused work.",
     };
   }
-  if (/gym|workout|run|appointment/.test(lower)) {
+  if (/gym|work\s*out|workout|run|appointment/.test(lower)) {
     return {
       minutes: 60,
       confidence: 0.48,
@@ -95,7 +97,7 @@ function categoryFor(text: string): TaskCategory {
     return "school";
   }
   if (/meeting|report|client|proposal|email/.test(lower)) return "work";
-  if (/gym|workout|run|yoga/.test(lower)) return "fitness";
+  if (/gym|work\s*out|workout|run|yoga/.test(lower)) return "fitness";
   if (/doctor|dentist|therapy|medication/.test(lower)) return "health";
   if (/buy|pick up|pickup|store|errand|groceries/.test(lower)) return "errand";
   return "personal";
@@ -118,7 +120,13 @@ function recurrenceCount(text: string): number | undefined {
   const match = /\b(one|two|three|four|five|six|seven|\d+)\s+times?\b/i.exec(
     text,
   );
-  if (!match) return undefined;
+  if (!match) {
+    return /\b(?:every\s+(?:other|second|2(?:nd)?)\s+day|on\s+alternate\s+days?|alternat(?:e|ing)\b.{0,40}\bdays?|day\s+on[\s,/-]+day\s+off)\b/i.test(
+      text,
+    )
+      ? 4
+      : undefined;
+  }
   return NUMBER_WORDS[match[1].toLocaleLowerCase()] ?? Number(match[1]);
 }
 
@@ -151,17 +159,21 @@ function extractDatePhrase(text: string): string | undefined {
 function localWeekWindow(
   currentLocalDate: string,
   timeZone: string,
+  text = "",
 ): { start: string; end: string } {
   const localReference = new Date(`${currentLocalDate}T12:00:00`);
-  const start = startOfWeek(localReference, { weekStartsOn: 1 });
-  const end = endOfWeek(localReference, { weekStartsOn: 1 });
+  const start = addWeeks(
+    startOfWeek(localReference, { weekStartsOn: 1 }),
+    /\bnext\s+week\b/i.test(text) ? 1 : 0,
+  );
+  const end = endOfWeek(start, { weekStartsOn: 1 });
   return {
     start: fromZonedTime(
-      `${start.toISOString().slice(0, 10)}T00:00:00`,
+      `${format(start, "yyyy-MM-dd")}T00:00:00`,
       timeZone,
     ).toISOString(),
     end: fromZonedTime(
-      `${end.toISOString().slice(0, 10)}T23:59:59`,
+      `${format(end, "yyyy-MM-dd")}T23:59:59`,
       timeZone,
     ).toISOString(),
   };
@@ -277,6 +289,10 @@ function buildTask(
 ): ExtractedTask {
   const estimate = estimateMinutes(line);
   const count = recurrenceCount(line);
+  const alternatingDays =
+    /\b(?:every\s+(?:other|second|2(?:nd)?)\s+day|on\s+alternate\s+days?|alternat(?:e|ing)\b.{0,40}\bdays?|day\s+on[\s,/-]+day\s+off)\b/i.test(
+      line,
+    );
   const fixed =
     !timedRecurrence && isFixedEvent(line) && !isDeadlineLanguage(line);
   const taskType =
@@ -312,7 +328,7 @@ function buildTask(
     Boolean(timedRecurrence?.issues.length) ||
     estimate.confidence < 0.5;
   const week = count
-    ? localWeekWindow(input.currentLocalDate, input.timeZone)
+    ? localWeekWindow(input.currentLocalDate, input.timeZone, line)
     : undefined;
 
   return {
@@ -342,8 +358,9 @@ function buildTask(
     recurrence: timedRecurrence?.recurrence ??
       (count
         ? {
-          frequency: "weekly",
+          frequency: alternatingDays ? "daily" : "weekly",
           mode: "quota",
+          interval: alternatingDays ? 2 : undefined,
           count,
           windowStart: week?.start,
           windowEnd: week?.end,
@@ -387,10 +404,19 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
     const ignoredStatements: ExtractionResult["ignoredStatements"] = [];
 
     lines.forEach((line, index) => {
-      const timedRecurrence = parseTimedRecurrence(line, {
-        currentLocalDate: input.currentLocalDate,
-        timeZone: input.timeZone,
-      });
+      const alternatingWithoutClock =
+        /\b(?:every\s+(?:other|second|2(?:nd)?)\s+day|on\s+alternate\s+days?|alternat(?:e|ing)\b.{0,40}\bdays?|day\s+on[\s,/-]+day\s+off)\b/i.test(
+          line,
+        ) &&
+        !/\b(?:[01]?\d|2[0-3]):[0-5]\d\s*(?:am|pm)?\b|\b(?:1[0-2]|0?[1-9])\s*(?:am|pm)\b/i.test(
+          line,
+        );
+      const timedRecurrence = alternatingWithoutClock
+        ? undefined
+        : parseTimedRecurrence(line, {
+            currentLocalDate: input.currentLocalDate,
+            timeZone: input.timeZone,
+          });
       const datePhrase = timedRecurrence ? undefined : extractDatePhrase(line);
       if (!isTaskCandidate(line, datePhrase)) {
         ignoredStatements.push({

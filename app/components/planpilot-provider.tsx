@@ -82,7 +82,7 @@ type PlanPilotContextValue = {
 const Context = createContext<PlanPilotContextValue | null>(null);
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
-const CURRENT_SCHEDULER_VERSION = 5;
+const CURRENT_SCHEDULER_VERSION = 6;
 
 function currentLocalDate(timeZone: string, instant = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-US", {

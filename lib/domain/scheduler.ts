@@ -100,6 +100,60 @@ function localParts(
   };
 }
 
+function calendarDistance(
+  frequency: NonNullable<ExtractedTask["recurrence"]>["frequency"],
+  left: string,
+  right: string,
+): number {
+  const leftDate = parseISO(left);
+  const rightDate = parseISO(right);
+  if (frequency === "weekly") {
+    return Math.abs(
+      differenceInCalendarWeeks(leftDate, rightDate, { weekStartsOn: 1 }),
+    );
+  }
+  if (frequency === "monthly") {
+    return Math.abs(differenceInCalendarMonths(leftDate, rightDate));
+  }
+  return Math.abs(differenceInCalendarDays(leftDate, rightDate));
+}
+
+function quotaRecurrenceAllowsDate(
+  task: ExtractedTask,
+  candidateDate: string,
+  taskSessions: PlannedSession[],
+  timeZone: string,
+): boolean {
+  const recurrence = task.recurrence;
+  if (task.taskType !== "recurring_goal" || !recurrence) return true;
+
+  const interval = Math.max(1, recurrence.interval ?? 1);
+  if (recurrence.anchorDate && interval > 1) {
+    const candidate = parseISO(candidateDate);
+    const anchor = parseISO(recurrence.anchorDate);
+    const signedDistance =
+      recurrence.frequency === "weekly"
+        ? differenceInCalendarWeeks(candidate, anchor, { weekStartsOn: 1 })
+        : recurrence.frequency === "monthly"
+          ? differenceInCalendarMonths(candidate, anchor)
+          : differenceInCalendarDays(candidate, anchor);
+    if (signedDistance < 0 || signedDistance % interval !== 0) return false;
+  }
+
+  return taskSessions.every((session) => {
+    const sessionDate = localParts(
+      new Date(session.start).getTime(),
+      timeZone,
+    ).date;
+    if (sessionDate === candidateDate) return false;
+    if (interval <= 1) return true;
+    return (
+      calendarDistance(recurrence.frequency, candidateDate, sessionDate) >=
+      interval
+    );
+  });
+}
+
 function clockMinutes(value: string): number {
   const [hours, minutes] = value.split(":").map(Number);
   return hours * 60 + minutes;
@@ -416,7 +470,10 @@ function candidateScore(
     );
   }
 
-  const targetFraction = task.dueAt || task.dueDate
+  const targetFraction =
+    task.taskType === "recurring_goal" && (task.recurrence?.interval ?? 1) > 1
+      ? 0
+      : task.dueAt || task.dueDate
     ? task.priority === "urgent"
       ? 0.2
       : task.priority === "high"
@@ -493,14 +550,16 @@ function findCandidate(
         start: end,
         end: end + breakMinutes * MINUTE,
       };
+      const recurrenceStart = task.recurrence?.windowStart
+        ? new Date(task.recurrence.windowStart).getTime()
+        : Number.NEGATIVE_INFINITY;
       if (
-        task.taskType === "recurring_goal" &&
-        taskSessions.some(
-          (session) =>
-            localParts(
-              new Date(session.start).getTime(),
-              input.preferences.timeZone,
-            ).date === local.date,
+        start < recurrenceStart ||
+        !quotaRecurrenceAllowsDate(
+          task,
+          local.date,
+          taskSessions,
+          input.preferences.timeZone,
         )
       ) {
         continue;

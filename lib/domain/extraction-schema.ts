@@ -206,13 +206,14 @@ export const extractedTaskSchema = z
     }
     if (
       (task.recurrence?.interval ?? 1) > 1 &&
+      task.recurrence?.mode === "fixed_times" &&
       !task.recurrence?.anchorDate &&
       !task.reviewRequired
     ) {
       context.addIssue({
         code: "custom",
         path: ["recurrence", "anchorDate"],
-        message: "An interval recurrence needs an anchor date or review.",
+        message: "A fixed-time interval recurrence needs an anchor date or review.",
       });
     }
     if (task.dueTime && !task.dueDate) {

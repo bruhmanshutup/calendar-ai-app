@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractionResultSchema } from "../lib/domain/extraction-schema";
+import { recoverFlexibleRecurrences } from "../lib/providers/flexible-recurrence-recovery";
 import { MockTaskExtractionProvider } from "../lib/providers/mock-extraction";
 import { recoverExplicitOverdueTasks } from "../lib/providers/overdue-recovery";
 import { recoverTimedRecurrences } from "../lib/providers/recurrence-recovery";
@@ -207,6 +208,65 @@ describe("extraction validation and mock interpretation", () => {
     expect(result.tasks[0].taskType).toBe("recurring_goal");
     expect(result.tasks[0].recurrence?.count).toBe(4);
     expect(result.tasks[0].estimatedMinutes).toBe(45);
+  });
+
+  it("interprets an alternating workout as per-session work with rest days", async () => {
+    const source = "Work out for 4 hours total next week, alternating between days.";
+    const result = await recoverFlexibleRecurrences(
+      { ...input, text: source },
+      {
+        tasks: [
+          task({
+            id: "workout",
+            title: "Work out",
+            sourceText: source,
+            taskType: "fixed_time",
+            fixedStartAt: "2026-08-03T16:00:00.000-07:00",
+            fixedEndAt: "2026-08-03T20:00:00.000-07:00",
+            estimatedMinutes: 240,
+            minimumSessionMinutes: 240,
+            effortEstimateSource: "stated",
+            effortEstimateRationale: "Used the stated total.",
+          }),
+        ],
+        ignoredStatements: [],
+      },
+    );
+
+    expect(result.tasks[0]).toMatchObject({
+      taskType: "recurring_goal",
+      fixedStartAt: undefined,
+      fixedEndAt: undefined,
+      estimatedMinutes: 60,
+      minimumSessionMinutes: 60,
+      recurrence: {
+        frequency: "daily",
+        mode: "quota",
+        interval: 2,
+        count: 4,
+        windowStart: "2026-08-03T07:00:00.000Z",
+        windowEnd: "2026-08-10T06:59:59.000Z",
+      },
+    });
+  });
+
+  it("recognizes every-other-day wording in local extraction", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: "Work out every other day next week.",
+    });
+
+    expect(result.tasks[0]).toMatchObject({
+      taskType: "recurring_goal",
+      estimatedMinutes: 60,
+      recurrence: {
+        frequency: "daily",
+        mode: "quota",
+        interval: 2,
+        count: 4,
+        windowStart: "2026-08-03T07:00:00.000Z",
+      },
+    });
   });
 
   it("keeps a split daily recurrence as one timed routine", async () => {

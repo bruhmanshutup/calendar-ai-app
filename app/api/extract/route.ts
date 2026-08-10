@@ -5,6 +5,7 @@ import { GeminiTaskExtractionProvider } from "@/lib/providers/gemini-extraction"
 import { OpenAITaskExtractionProvider } from "@/lib/providers/openai-extraction";
 import { recoverExplicitOverdueTasks } from "@/lib/providers/overdue-recovery";
 import { recoverTimedRecurrences } from "@/lib/providers/recurrence-recovery";
+import { recoverFlexibleRecurrences } from "@/lib/providers/flexible-recurrence-recovery";
 import {
   TaskExtractionError,
   type TaskExtractionProvider,
@@ -57,9 +58,13 @@ export async function POST(request: Request): Promise<Response> {
       parsed.data,
       extracted,
     );
-    const result = await recoverTimedRecurrences(
+    const withTimedRecurrences = await recoverTimedRecurrences(
       parsed.data,
       withOverdueRecovery,
+    );
+    const result = await recoverFlexibleRecurrences(
+      parsed.data,
+      withTimedRecurrences,
     );
     return NextResponse.json({ ...result, extractionMode: selected.mode });
   } catch (error) {
