@@ -36,6 +36,7 @@ import {
   Sun,
   Target,
   Trash2,
+  Undo2,
   Upload,
   UserRound,
   Waypoints,
@@ -1660,6 +1661,9 @@ function ScheduleView() {
     exportApprovedSessions,
     exportState,
     requestAnotherTime,
+    canUndoSchedule,
+    undoScheduleLabel,
+    undoSchedule,
   } = usePlanPilot();
   const [mode, setMode] = useState<"week" | "list">("week");
   const [expandedReasonIds, setExpandedReasonIds] = useState<string[]>([]);
@@ -1738,6 +1742,20 @@ function ScheduleView() {
           {allReasonsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           {allReasonsExpanded ? "Collapse all" : "Expand all"}
         </button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="schedule-undo-button"
+          onClick={undoSchedule}
+          disabled={!canUndoSchedule}
+          title={
+            canUndoSchedule
+              ? `Undo ${undoScheduleLabel}`
+              : "No schedule changes to undo"
+          }
+        >
+          <Undo2 size={14} /> Undo
+        </Button>
         <span className="schedule-range">{weekColumns[0].range} – {weekColumns.at(-1)?.range}</span>
       </div>
       {mode === "week" ? (

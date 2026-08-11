@@ -13,6 +13,11 @@ import { fromZonedTime } from "date-fns-tz";
 import { DEFAULT_PREFERENCES } from "@/lib/defaults";
 import { generateSchedule } from "@/lib/domain/scheduler";
 import { mergeImportedTasks } from "@/lib/domain/task-import";
+import {
+  popPlanningUndo,
+  pushPlanningUndo,
+  type PlanningUndoSnapshot,
+} from "@/lib/domain/planning-undo";
 import { proposeMinimalReplan } from "@/lib/domain/rescheduler";
 import {
   canRecordSessionOutcome,
@@ -73,6 +78,9 @@ type PlanPilotContextValue = {
   history: HistoryItem[];
   planningMode: PlanningMode;
   setPlanningMode: (mode: PlanningMode) => void;
+  canUndoSchedule: boolean;
+  undoScheduleLabel?: string;
+  undoSchedule: () => void;
   theme: "light" | "dark";
   toggleTheme: () => void;
   clearWorkspace: () => void;
@@ -232,6 +240,9 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
   const [replan, setReplan] = useState<ReplanProposal>();
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [sessionReviews, setSessionReviews] = useState<SessionReview[]>([]);
+  const [scheduleUndoStack, setScheduleUndoStack] = useState<
+    PlanningUndoSnapshot[]
+  >([]);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [toast, setToast] = useState<string>();
   const [workspaceStatus, setWorkspaceStatus] =
@@ -336,6 +347,55 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     [now, proposal.sessions],
   );
 
+  const rememberScheduleChange = useCallback(
+    (label: string) => {
+      const snapshot: PlanningUndoSnapshot = {
+        label,
+        tasks,
+        proposal,
+        planningMode,
+        replan,
+        selectedSessionIds,
+        sessionReviews,
+      };
+      setScheduleUndoStack((stack) => pushPlanningUndo(stack, snapshot));
+    },
+    [
+      planningMode,
+      proposal,
+      replan,
+      selectedSessionIds,
+      sessionReviews,
+      tasks,
+    ],
+  );
+
+  const undoSchedule = useCallback(() => {
+    const { snapshot, remaining } = popPlanningUndo(scheduleUndoStack);
+    if (!snapshot) {
+      setToast("There are no schedule changes to undo.");
+      return;
+    }
+    setTasks(snapshot.tasks);
+    setProposal(snapshot.proposal);
+    setPlanningModeState(snapshot.planningMode);
+    setReplan(snapshot.replan);
+    setSelectedSessionIds(snapshot.selectedSessionIds);
+    setSessionReviews(snapshot.sessionReviews);
+    setScheduleUndoStack(remaining);
+    setHistory((items) => [
+      {
+        id: `history-undo-${Date.now()}`,
+        at: nowLabel(),
+        icon: "move",
+        title: `Undid ${snapshot.label}`,
+        detail: "Restored the responsibilities and schedule to their previous state.",
+      },
+      ...items,
+    ]);
+    setToast(`Undid ${snapshot.label}.`);
+  }, [scheduleUndoStack]);
+
   const refresh = useCallback(
     (nextTasks: ExtractedTask[], nextMode = planningMode) => {
       setProposal(scheduleFor(nextTasks, nextMode));
@@ -377,6 +437,9 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       const preservedBreaks = proposal.breaks.filter((item) =>
         preservedSessionIds.has(item.afterSessionId),
       );
+      if (merged.addedTasks.length > 0) {
+        rememberScheduleChange("responsibility import");
+      }
       setTasks(merged.tasks);
       setExtractionMode(body.extractionMode);
       setProposal(
@@ -415,10 +478,16 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           : "Extraction failed. Your text is still here to retry.",
       );
     }
-  }, [importText, planningMode, proposal, tasks]);
+  }, [importText, planningMode, proposal, rememberScheduleChange, tasks]);
 
   const updateTask = useCallback(
-    (id: string, patch: Partial<ExtractedTask>) => {
+    (
+      id: string,
+      patch: Partial<ExtractedTask>,
+      undoLabel = "task edit",
+    ) => {
+      if (!tasks.some((task) => task.id === id)) return;
+      rememberScheduleChange(undoLabel);
       setTasks((current) => {
         const next = current.map((task) =>
           task.id === id ? { ...task, ...patch } : task,
@@ -427,16 +496,20 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         return next;
       });
     },
-    [refresh],
+    [refresh, rememberScheduleChange, tasks],
   );
 
   const approveTask = useCallback(
     (id: string) => {
-      updateTask(id, {
-        approved: true,
-        reviewRequired: false,
-        missingInformation: [],
-      });
+      updateTask(
+        id,
+        {
+          approved: true,
+          reviewRequired: false,
+          missingInformation: [],
+        },
+        "task approval",
+      );
       setToast("Task approved and included in the next proposal.");
     },
     [updateTask],
@@ -444,6 +517,8 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
 
   const deleteTask = useCallback(
     (id: string) => {
+      if (!tasks.some((task) => task.id === id)) return;
+      rememberScheduleChange("task deletion");
       setTasks((current) => {
         const next = current.filter((task) => task.id !== id);
         refresh(next);
@@ -451,10 +526,18 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       });
       setToast("Task removed.");
     },
-    [refresh],
+    [refresh, rememberScheduleChange, tasks],
   );
 
   const approveSession = useCallback((id: string) => {
+    if (
+      !proposal.sessions.some(
+        (session) => session.id === id && session.status === "proposed",
+      )
+    ) {
+      return;
+    }
+    rememberScheduleChange("session approval");
     setProposal((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
@@ -464,9 +547,13 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       ),
     }));
     setToast("Session approved. It will enter Daily Review after it ends.");
-  }, []);
+  }, [proposal.sessions, rememberScheduleChange]);
 
   const approveAllSessions = useCallback(() => {
+    if (!proposal.sessions.some((session) => session.status === "proposed")) {
+      return;
+    }
+    rememberScheduleChange("complete plan approval");
     setProposal((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
@@ -477,86 +564,89 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     }));
     setSelectedSessionIds([]);
     setToast("All proposed sessions approved. They will be reviewed after they end.");
-  }, []);
+  }, [proposal.sessions, rememberScheduleChange]);
 
   const toggleSessionLock = useCallback((id: string) => {
+    if (!proposal.sessions.some((session) => session.id === id)) return;
+    rememberScheduleChange("session lock change");
     setProposal((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
         session.id === id ? { ...session, locked: !session.locked } : session,
       ),
     }));
-  }, []);
+  }, [proposal.sessions, rememberScheduleChange]);
 
   const rejectSession = useCallback((id: string) => {
+    if (!proposal.sessions.some((session) => session.id === id)) return;
+    rememberScheduleChange("session rejection");
     setProposal((current) => ({
       ...current,
       sessions: current.sessions.filter((session) => session.id !== id),
     }));
     setToast("Session rejected. The task remains unscheduled.");
-  }, []);
+  }, [proposal.sessions, rememberScheduleChange]);
 
   const requestAnotherTime = useCallback(
     (id: string) => {
-      setProposal((current) => {
-        const target = current.sessions.find((session) => session.id === id);
-        if (!target || target.locked) {
-          setToast("Locked sessions must be unlocked before they can move.");
-          return current;
+      const target = proposal.sessions.find((session) => session.id === id);
+      if (!target || target.locked) {
+        setToast("Locked sessions must be unlocked before they can move.");
+        return;
+      }
+      const base = schedulingBase(planningMode, tasks);
+      const increment = 15 * MINUTE;
+      const duration =
+        new Date(target.end).getTime() - new Date(target.start).getTime();
+      let start = new Date(target.start).getTime() + increment;
+      const task = tasks.find((item) => item.id === target.taskId);
+      const deadlineValue = task?.dueAt ?? task?.recurrence?.windowEnd;
+      const deadlineAt = deadlineValue
+        ? new Date(deadlineValue).getTime()
+        : new Date(base.windowEnd).getTime();
+      for (let attempt = 0; attempt < 7 * 24 * 4; attempt += 1) {
+        const end = start + duration;
+        const insideAvailability = base.availability.some(
+          (interval) =>
+            start >= new Date(interval.start).getTime() &&
+            end <= new Date(interval.end).getTime(),
+        );
+        const overlaps = proposal.sessions.some(
+          (session) =>
+            session.id !== id &&
+            start < new Date(session.end).getTime() &&
+            new Date(session.start).getTime() < end,
+        );
+        if (insideAvailability && !overlaps && end <= deadlineAt) {
+          rememberScheduleChange("session move");
+          setProposal({
+            ...proposal,
+            sessions: proposal.sessions
+              .map((session) =>
+                session.id === id
+                  ? {
+                      ...session,
+                      start: new Date(start).toISOString(),
+                      end: new Date(end).toISOString(),
+                      reviewAfter: undefined,
+                      explanation:
+                        "Moved to another valid opening at your request. The deadline and existing sessions remain protected.",
+                    }
+                  : session,
+              )
+              .sort(
+                (a, b) =>
+                  new Date(a.start).getTime() - new Date(b.start).getTime(),
+              ),
+          });
+          setToast("Moved to the next valid opening.");
+          return;
         }
-        const base = schedulingBase(planningMode, tasks);
-        const increment = 15 * MINUTE;
-        const duration =
-          new Date(target.end).getTime() - new Date(target.start).getTime();
-        let start = new Date(target.start).getTime() + increment;
-        const task = tasks.find((item) => item.id === target.taskId);
-        const deadlineValue = task?.dueAt ?? task?.recurrence?.windowEnd;
-        const deadlineAt = deadlineValue
-          ? new Date(deadlineValue).getTime()
-          : new Date(base.windowEnd).getTime();
-        for (let attempt = 0; attempt < 7 * 24 * 4; attempt += 1) {
-          const end = start + duration;
-          const insideAvailability = base.availability.some(
-            (interval) =>
-              start >= new Date(interval.start).getTime() &&
-              end <= new Date(interval.end).getTime(),
-          );
-          const overlaps = current.sessions.some(
-            (session) =>
-              session.id !== id &&
-              start < new Date(session.end).getTime() &&
-              new Date(session.start).getTime() < end,
-          );
-          if (insideAvailability && !overlaps && end <= deadlineAt) {
-            setToast("Moved to the next valid opening.");
-            return {
-              ...current,
-              sessions: current.sessions
-                .map((session) =>
-                  session.id === id
-                    ? {
-                        ...session,
-                        start: new Date(start).toISOString(),
-                        end: new Date(end).toISOString(),
-                        reviewAfter: undefined,
-                        explanation:
-                          "Moved to another valid opening at your request. The deadline and existing sessions remain protected.",
-                      }
-                    : session,
-                )
-                .sort(
-                  (a, b) =>
-                    new Date(a.start).getTime() - new Date(b.start).getTime(),
-                ),
-            };
-          }
-          start += increment;
-        }
-        setToast("No other valid opening fits before the deadline. Nothing moved.");
-        return current;
-      });
+        start += increment;
+      }
+      setToast("No other valid opening fits before the deadline. Nothing moved.");
     },
-    [planningMode, tasks],
+    [planningMode, proposal, rememberScheduleChange, tasks],
   );
 
   const toggleSelectedSession = useCallback((id: string) => {
@@ -639,6 +729,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         return;
       }
       const { completedMinutes, remainingMinutes } = review;
+      rememberScheduleChange("session outcome");
       setSessionReviews((items) => [review, ...items]);
 
       const taskFinished = !!task &&
@@ -731,10 +822,12 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           : "Outcome saved.",
       );
     },
-    [planningMode, proposal.sessions, reviewQueue, tasks],
+    [planningMode, proposal.sessions, rememberScheduleChange, reviewQueue, tasks],
   );
 
   const delaySessionReview = useCallback((sessionId: string) => {
+    if (!proposal.sessions.some((session) => session.id === sessionId)) return;
+    rememberScheduleChange("session review delay");
     const reviewAfter = new Date(Date.now() + 15 * MINUTE).toISOString();
     setProposal((current) => ({
       ...current,
@@ -745,10 +838,13 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       ),
     }));
     setToast("Still working noted. PlanPilot will ask again in 15 minutes.");
-  }, []);
+  }, [proposal.sessions, rememberScheduleChange]);
 
   const applyReplan = useCallback(() => {
     if (!replan) return;
+    if (replan.changes.some((change) => "after" in change)) {
+      rememberScheduleChange("recovery change");
+    }
     setProposal((current) => {
       let sessions = [...current.sessions];
       for (const change of replan.changes) {
@@ -782,15 +878,17 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       changed ? "Recovery session added. Other sessions were preserved." : "Outcome kept; no valid recovery opening was available.",
     );
     setReplan(undefined);
-  }, [replan]);
+  }, [rememberScheduleChange, replan]);
 
   const setPlanningMode = useCallback(
     (mode: PlanningMode) => {
+      if (mode === planningMode) return;
+      rememberScheduleChange("planning mode change");
       setPlanningModeState(mode);
       refresh(tasks, mode);
       setToast(`${mode[0].toUpperCase()}${mode.slice(1)} planning rules applied.`);
     },
-    [refresh, tasks],
+    [planningMode, refresh, rememberScheduleChange, tasks],
   );
 
   const toggleTheme = useCallback(() => {
@@ -813,6 +911,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     setReplan(undefined);
     setHistory([]);
     setSessionReviews([]);
+    setScheduleUndoStack([]);
     void fetch("/api/workspace", { method: "DELETE" });
     setToast("Workspace cleared. Planning preferences and theme were kept.");
   }, [planningMode]);
@@ -848,6 +947,9 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       history,
       planningMode,
       setPlanningMode,
+      canUndoSchedule: scheduleUndoStack.length > 0,
+      undoScheduleLabel: scheduleUndoStack.at(-1)?.label,
+      undoSchedule,
       theme,
       toggleTheme,
       clearWorkspace,
@@ -884,6 +986,8 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       history,
       planningMode,
       setPlanningMode,
+      scheduleUndoStack,
+      undoSchedule,
       theme,
       toggleTheme,
       clearWorkspace,
