@@ -3,7 +3,10 @@ import type { ExtractedTask } from "./types";
 export type TaskImportMerge = {
   tasks: ExtractedTask[];
   addedTasks: ExtractedTask[];
+  importedTaskIds: string[];
   duplicateCount: number;
+  removedMetadataCount: number;
+  refreshedTaskCount: number;
 };
 
 function normalizedText(value: string | undefined): string {
@@ -11,17 +14,24 @@ function normalizedText(value: string | undefined): string {
 }
 
 function taskFingerprint(task: ExtractedTask): string {
-  return JSON.stringify({
-    sourceText: normalizedText(task.sourceText),
-    title: normalizedText(task.title),
-    taskType: task.taskType,
-    dueDate: task.dueDate ?? null,
-    dueTime: task.dueTime ?? null,
-    dueAt: task.dueAt ?? null,
-    fixedStartAt: task.fixedStartAt ?? null,
-    fixedEndAt: task.fixedEndAt ?? null,
-    recurrence: task.recurrence ?? null,
-  });
+  const source = normalizedText(task.sourceText);
+  return source || normalizedText(task.title);
+}
+
+function isClearlyImportMetadata(task: ExtractedTask): boolean {
+  const source = task.sourceText.trim();
+  const title = normalizedText(task.title).replace(/[*_~`#]+/g, " ");
+  const monthHeading =
+    /^(?:tasks?\s+)?due\s+in\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(
+      title,
+    );
+  const markdownLinksOnly =
+    /^(?:\s*!?\[[^\]]+]\([^)]+\)\s*)+$/.test(source);
+  const actionableTitle =
+    /\b(?:apply|book|buy|call|complete|confirm|email|finish|pay|read|register|reply|request|review|schedule|select|send|submit|upload|view|waive|write)\b/i.test(
+      title,
+    );
+  return monthHeading || (markdownLinksOnly && !actionableTitle);
 }
 
 function defaultTaskId(): string {
@@ -46,32 +56,65 @@ export function mergeImportedTasks(
   importedTasks: ExtractedTask[],
   createId: () => string = defaultTaskId,
 ): TaskImportMerge {
-  const fingerprints = new Set(existingTasks.map(taskFingerprint));
+  const retainedTasks = existingTasks.filter(
+    (task) => !isClearlyImportMetadata(task),
+  );
+  const existingByFingerprint = new Map(
+    retainedTasks.map((task) => [taskFingerprint(task), task]),
+  );
+  const fingerprints = new Set(existingByFingerprint.keys());
   const usedIds = new Set(
-    existingTasks
+    retainedTasks
       .map((task) => task.id)
       .filter((id): id is string => !!id),
   );
   const addedTasks: ExtractedTask[] = [];
+  const refreshedTasks = new Map<string, ExtractedTask>();
+  const importedTaskIds: string[] = [];
   let duplicateCount = 0;
 
   for (const task of importedTasks) {
     const fingerprint = taskFingerprint(task);
     if (fingerprints.has(fingerprint)) {
       duplicateCount += 1;
+      const existingId = existingByFingerprint.get(fingerprint)?.id;
+      if (existingId && !importedTaskIds.includes(existingId)) {
+        importedTaskIds.push(existingId);
+      }
+      const existing = existingByFingerprint.get(fingerprint);
+      if (existingId && existing && /[*_~`\[\]]/.test(existing.title)) {
+        refreshedTasks.set(existingId, {
+          ...task,
+          id: existingId,
+          completed: existing.completed,
+          completedAt: existing.completedAt,
+          completedMinutes: existing.completedMinutes,
+          cancelled: existing.cancelled,
+          cancelledAt: existing.cancelledAt,
+        });
+      }
       continue;
     }
 
     const id = uniqueTaskId(task.id, usedIds, createId);
     const added = { ...task, id };
     addedTasks.push(added);
+    importedTaskIds.push(id);
     fingerprints.add(fingerprint);
     usedIds.add(id);
   }
 
   return {
-    tasks: [...existingTasks, ...addedTasks],
+    tasks: [
+      ...retainedTasks.map((task) =>
+        task.id ? (refreshedTasks.get(task.id) ?? task) : task,
+      ),
+      ...addedTasks,
+    ],
     addedTasks,
+    importedTaskIds,
     duplicateCount,
+    removedMetadataCount: existingTasks.length - retainedTasks.length,
+    refreshedTaskCount: refreshedTasks.size,
   };
 }

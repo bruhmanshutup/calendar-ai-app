@@ -434,22 +434,29 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       }
       const extractedTasks = body.tasks;
       const merged = mergeImportedTasks(tasks, extractedTasks);
-      const preservedSessions = proposal.sessions;
+      const retainedTaskIds = new Set(
+        merged.tasks
+          .map((task) => task.id)
+          .filter((id): id is string => !!id),
+      );
+      const preservedSessions = proposal.sessions.filter((session) =>
+        retainedTaskIds.has(session.taskId),
+      );
       const preservedSessionIds = new Set(
         preservedSessions.map((session) => session.id),
       );
       const preservedBreaks = proposal.breaks.filter((item) =>
         preservedSessionIds.has(item.afterSessionId),
       );
-      if (merged.addedTasks.length > 0) {
+      if (
+        merged.addedTasks.length > 0 ||
+        merged.removedMetadataCount > 0 ||
+        merged.refreshedTaskCount > 0
+      ) {
         rememberScheduleChange("responsibility import");
       }
       setTasks(merged.tasks);
-      setLastImportedTaskIds(
-        merged.addedTasks
-          .map((task) => task.id)
-          .filter((id): id is string => !!id),
-      );
+      setLastImportedTaskIds(merged.importedTaskIds);
       setExtractionMode(body.extractionMode);
       setProposal(
         scheduleFor(
@@ -469,13 +476,15 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           title: `${merged.addedTasks.length} responsibilities added`,
           detail:
             body.extractionMode !== "local"
-              ? `${body.extractionMode === "gemini" ? "Gemini" : "OpenAI"} estimated effort and session length; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were skipped.` : ""}`
-              : `Local fallback estimates were used; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were skipped.` : ""}`,
+              ? `${body.extractionMode === "gemini" ? "Gemini" : "OpenAI"} estimated effort and session length; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were reused.` : ""}${merged.removedMetadataCount > 0 ? ` ${merged.removedMetadataCount} non-task portal rows were removed.` : ""}${merged.refreshedTaskCount > 0 ? ` ${merged.refreshedTaskCount} earlier interpretations were corrected.` : ""}`
+              : `Local fallback estimates were used; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were reused.` : ""}${merged.removedMetadataCount > 0 ? ` ${merged.removedMetadataCount} non-task portal rows were removed.` : ""}${merged.refreshedTaskCount > 0 ? ` ${merged.refreshedTaskCount} earlier interpretations were corrected.` : ""}`,
         },
         ...items,
       ]);
       setToast(
-        merged.addedTasks.length > 0
+        merged.removedMetadataCount > 0 || merged.refreshedTaskCount > 0
+          ? `Cleaned up ${merged.removedMetadataCount} non-task portal rows and corrected ${merged.refreshedTaskCount} earlier interpretations.`
+          : merged.addedTasks.length > 0
           ? `${merged.addedTasks.length} responsibilities added. Existing commitments were preserved.`
           : "Those responsibilities are already in your plan.",
       );
