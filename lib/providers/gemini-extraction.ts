@@ -58,6 +58,7 @@ export class GeminiTaskExtractionProvider
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`,
       {
         method: "POST",
+        signal: AbortSignal.timeout(20_000),
         headers: {
           "Content-Type": "application/json",
           "x-goog-api-key": this.apiKey,

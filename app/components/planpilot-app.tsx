@@ -1474,12 +1474,24 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
 }
 
 function ReviewView() {
-  const { tasks, approveTask } = usePlanPilot();
-  const [filter, setFilter] = useState<"review" | "ready" | "all">("review");
-  const shown = tasks.filter((task) =>
-    filter === "all" ? true : filter === "review" ? task.reviewRequired : !task.reviewRequired,
+  const { tasks, approveTask, lastImportedTaskIds } = usePlanPilot();
+  const latestIds = new Set(lastImportedTaskIds);
+  const latestTasks = tasks.filter((task) => task.id && latestIds.has(task.id));
+  const [filter, setFilter] = useState<"recent" | "review" | "ready" | "all">(
+    latestTasks.length > 0 ? "recent" : "review",
   );
-  const reviewCount = tasks.filter((task) => task.reviewRequired).length;
+  const shown = tasks.filter((task) =>
+    filter === "recent"
+      ? !!task.id && latestIds.has(task.id)
+      : filter === "all"
+        ? true
+        : filter === "review"
+          ? task.reviewRequired
+          : !task.reviewRequired,
+  );
+  const scopedTasks = filter === "recent" ? latestTasks : tasks;
+  const reviewCount = scopedTasks.filter((task) => task.reviewRequired).length;
+  const allReviewCount = tasks.filter((task) => task.reviewRequired).length;
   if (tasks.length === 0) {
     return (
       <>
@@ -1504,11 +1516,15 @@ function ReviewView() {
     <>
       <PageHeading
         eyebrow="REVIEW INTERPRETATION"
-        title="Check what PlanPilot understood."
-        detail="Low-confidence fields are marked individually. The source stays beside each interpretation."
+        title={filter === "recent" ? "Review what you just added." : "Check what PlanPilot understood."}
+        detail={
+          filter === "recent"
+            ? "Older responsibilities remain protected in the plan but stay out of this latest-import view."
+            : "Low-confidence fields are marked individually. The source stays beside each interpretation."
+        }
         actions={
           <Button
-            onClick={() => tasks.filter((task) => task.reviewRequired).forEach((task) => approveTask(task.id ?? ""))}
+            onClick={() => scopedTasks.filter((task) => task.reviewRequired).forEach((task) => approveTask(task.id ?? ""))}
             disabled={reviewCount === 0}
           >
             <Check size={16} /> Approve reviewed tasks
@@ -1516,9 +1532,9 @@ function ReviewView() {
         }
       />
       <div className="review-summary">
-        <div><strong>{tasks.length}</strong><span>Tasks found</span></div>
+        <div><strong>{scopedTasks.length}</strong><span>{filter === "recent" ? "Just added" : "Tasks found"}</span></div>
         <div><strong>{reviewCount}</strong><span>Need review</span></div>
-        <div><strong>{tasks.filter((task) => !task.reviewRequired).length}</strong><span>Ready</span></div>
+        <div><strong>{scopedTasks.filter((task) => !task.reviewRequired).length}</strong><span>Ready</span></div>
         <div className="confidence-legend">
           <span><i className="high" /> High confidence</span>
           <span><i className="medium" /> Check context</span>
@@ -1526,9 +1542,15 @@ function ReviewView() {
         </div>
       </div>
       <div className="filter-tabs">
-        {(["review", "ready", "all"] as const).map((item) => (
+        {([...(latestTasks.length > 0 ? ["recent" as const] : []), "review", "ready", "all"] as const).map((item) => (
           <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>
-            {item === "review" ? `Needs review (${reviewCount})` : item === "ready" ? `Ready (${tasks.length - reviewCount})` : `All (${tasks.length})`}
+            {item === "recent"
+              ? `Just added (${latestTasks.length})`
+              : item === "review"
+                ? `Needs review (${allReviewCount})`
+                : item === "ready"
+                  ? `Ready (${tasks.length - allReviewCount})`
+                  : `All (${tasks.length})`}
           </button>
         ))}
       </div>
@@ -1538,9 +1560,9 @@ function ReviewView() {
         )}
       </div>
       <div className="sticky-review-action">
-        <div><strong>{tasks.length - reviewCount} of {tasks.length} tasks ready</strong><span>Unresolved fixed events will stay off the schedule.</span></div>
+        <div><strong>{scopedTasks.length - reviewCount} of {scopedTasks.length} {filter === "recent" ? "new tasks" : "tasks"} ready</strong><span>{filter === "recent" ? "Existing responsibilities stay protected in the updated schedule." : "Unresolved fixed events will stay off the schedule."}</span></div>
         <Link className="button button-primary button-md" href="/schedule">
-          Build proposed schedule <ArrowRight size={16} />
+          {filter === "recent" ? "View updated schedule" : "Build proposed schedule"} <ArrowRight size={16} />
         </Link>
       </div>
     </>
@@ -1654,6 +1676,7 @@ function scheduleColumns(sessions: PlannedSession[]) {
 function ScheduleView() {
   const {
     tasks,
+    lastImportedTaskIds,
     proposal,
     approveAllSessions,
     selectedSessionIds,
@@ -1666,14 +1689,24 @@ function ScheduleView() {
     undoSchedule,
   } = usePlanPilot();
   const [mode, setMode] = useState<"week" | "list">("week");
+  const [scope, setScope] = useState<"recent" | "all">(
+    lastImportedTaskIds.length > 0 ? "recent" : "all",
+  );
   const [expandedReasonIds, setExpandedReasonIds] = useState<string[]>([]);
-  const weekColumns = scheduleColumns(proposal.sessions);
+  const latestTaskIds = new Set(lastImportedTaskIds);
+  const visibleSessions = proposal.sessions.filter(
+    (session) => scope === "all" || latestTaskIds.has(session.taskId),
+  );
+  const visibleUnschedulable = proposal.unschedulable.filter(
+    (task) => scope === "all" || latestTaskIds.has(task.taskId),
+  );
+  const weekColumns = scheduleColumns(visibleSessions);
   const allReasonsExpanded =
-    proposal.sessions.length > 0 &&
-    proposal.sessions.every((session) => expandedReasonIds.includes(session.id));
+    visibleSessions.length > 0 &&
+    visibleSessions.every((session) => expandedReasonIds.includes(session.id));
   const toggleAllReasons = () => {
     setExpandedReasonIds(
-      allReasonsExpanded ? [] : proposal.sessions.map((session) => session.id),
+      allReasonsExpanded ? [] : visibleSessions.map((session) => session.id),
     );
   };
   const setReasonExpanded = (sessionId: string, expanded: boolean) => {
@@ -1685,7 +1718,19 @@ function ScheduleView() {
         : current.filter((id) => id !== sessionId),
     );
   };
-  const approveSelected = () => selectedSessionIds.forEach(approveSession);
+  const visibleSelectedIds = selectedSessionIds.filter((id) =>
+    visibleSessions.some((session) => session.id === id),
+  );
+  const approveSelected = () => visibleSelectedIds.forEach(approveSession);
+  const approveVisiblePlan = () => {
+    if (scope === "all") {
+      approveAllSessions();
+      return;
+    }
+    visibleSessions
+      .filter((session) => session.status === "proposed")
+      .forEach((session) => approveSession(session.id));
+  };
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const sessionId = event.dataTransfer.getData("text/plain");
@@ -1717,13 +1762,17 @@ function ScheduleView() {
       <PageHeading
         eyebrow="PROPOSED SCHEDULE · VERSION 3"
         title="A realistic plan for the weeks ahead."
-        detail="Drag unlocked sessions, request another time, or approve only what works. Invalid placements are rejected."
+        detail={
+          scope === "recent"
+            ? "Showing the latest import. Earlier commitments still protect their time without cluttering this view."
+            : "Drag unlocked sessions, request another time, or approve only what works. Invalid placements are rejected."
+        }
         actions={
           <>
-            <Button variant="secondary" onClick={approveSelected} disabled={!selectedSessionIds.length}>
-              Approve selected ({selectedSessionIds.length})
+            <Button variant="secondary" onClick={approveSelected} disabled={!visibleSelectedIds.length}>
+              Approve selected ({visibleSelectedIds.length})
             </Button>
-            <Button onClick={approveAllSessions}><Check size={16} /> Approve complete plan</Button>
+            <Button onClick={approveVisiblePlan}><Check size={16} /> {scope === "recent" ? "Approve added sessions" : "Approve complete plan"}</Button>
           </>
         }
       />
@@ -1733,6 +1782,12 @@ function ScheduleView() {
           <button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}><CalendarDays size={15} /> Timeline</button>
           <button className={mode === "list" ? "active" : ""} onClick={() => setMode("list")}><LayoutList size={15} /> Task list</button>
         </div>
+        {lastImportedTaskIds.length > 0 && (
+          <div className="view-toggle schedule-scope-toggle" aria-label="Schedule responsibility scope">
+            <button className={scope === "recent" ? "active" : ""} onClick={() => setScope("recent")}>Just added</button>
+            <button className={scope === "all" ? "active" : ""} onClick={() => setScope("all")}>All responsibilities</button>
+          </div>
+        )}
         <button
           type="button"
           className="reasoning-all-button"
@@ -1764,7 +1819,7 @@ function ScheduleView() {
           style={{ gridTemplateColumns: `repeat(${weekColumns.length}, minmax(180px, 1fr))` }}
         >
           {weekColumns.map((day) => {
-            const sessions = proposal.sessions.filter(
+            const sessions = visibleSessions.filter(
               (session) =>
                 new Intl.DateTimeFormat("en-CA", {
                   timeZone: "America/Los_Angeles",
@@ -1800,7 +1855,7 @@ function ScheduleView() {
         </div>
       ) : (
         <div className="schedule-list-view">
-          {proposal.sessions.map((session) => (
+          {visibleSessions.map((session) => (
             <div key={session.id}>
               <span className="list-day">{formatDay(session.start, true)}</span>
               <ScheduleSessionCard
@@ -1818,7 +1873,10 @@ function ScheduleView() {
         <section className="panel">
           <div className="panel-heading"><div><h2>Work that does not fit yet</h2><p>No tasks are quietly squeezed into invalid time.</p></div></div>
           <div className="unschedulable-list">
-            {proposal.unschedulable.map((task) => <UnschedulableTaskCard task={task} key={task.taskId} />)}
+            {visibleUnschedulable.map((task) => <UnschedulableTaskCard task={task} key={task.taskId} />)}
+            {visibleUnschedulable.length === 0 && (
+              <p className="open-day">Everything in this view fits.</p>
+            )}
           </div>
         </section>
         <section className="export-panel">

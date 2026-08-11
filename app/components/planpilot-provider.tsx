@@ -46,6 +46,7 @@ type WorkspaceStatus = "loading" | "ready" | "error";
 
 type PlanPilotContextValue = {
   tasks: ExtractedTask[];
+  lastImportedTaskIds: string[];
   proposal: ScheduleProposal;
   importText: string;
   setImportText: (text: string) => void;
@@ -225,6 +226,7 @@ function nowLabel(): string {
 
 export function PlanPilotProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<ExtractedTask[]>([]);
+  const [lastImportedTaskIds, setLastImportedTaskIds] = useState<string[]>([]);
   const [planningMode, setPlanningModeState] =
     useState<PlanningMode>("balanced");
   const [proposal, setProposal] = useState<ScheduleProposal>(() =>
@@ -357,6 +359,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         replan,
         selectedSessionIds,
         sessionReviews,
+        lastImportedTaskIds,
       };
       setScheduleUndoStack((stack) => pushPlanningUndo(stack, snapshot));
     },
@@ -366,6 +369,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       replan,
       selectedSessionIds,
       sessionReviews,
+      lastImportedTaskIds,
       tasks,
     ],
   );
@@ -382,6 +386,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     setReplan(snapshot.replan);
     setSelectedSessionIds(snapshot.selectedSessionIds);
     setSessionReviews(snapshot.sessionReviews);
+    setLastImportedTaskIds(snapshot.lastImportedTaskIds);
     setScheduleUndoStack(remaining);
     setHistory((items) => [
       {
@@ -411,6 +416,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     try {
       const response = await fetch("/api/extract", {
         method: "POST",
+        signal: AbortSignal.timeout(35_000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: importText,
@@ -428,9 +434,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       }
       const extractedTasks = body.tasks;
       const merged = mergeImportedTasks(tasks, extractedTasks);
-      const preservedSessions = proposal.sessions.filter(
-        (session) => session.status !== "proposed" || session.locked,
-      );
+      const preservedSessions = proposal.sessions;
       const preservedSessionIds = new Set(
         preservedSessions.map((session) => session.id),
       );
@@ -441,6 +445,11 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         rememberScheduleChange("responsibility import");
       }
       setTasks(merged.tasks);
+      setLastImportedTaskIds(
+        merged.addedTasks
+          .map((task) => task.id)
+          .filter((id): id is string => !!id),
+      );
       setExtractionMode(body.extractionMode);
       setProposal(
         scheduleFor(
@@ -473,7 +482,10 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       setImportState("error");
       setImportError(
-        error instanceof Error
+        error instanceof DOMException &&
+          ["AbortError", "TimeoutError"].includes(error.name)
+          ? "Interpretation took too long. Your text is still here—please retry."
+          : error instanceof Error
           ? error.message
           : "Extraction failed. Your text is still here to retry.",
       );
@@ -901,6 +913,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
 
   const clearWorkspace = useCallback(() => {
     setTasks([]);
+    setLastImportedTaskIds([]);
     setProposal(scheduleFor([], planningMode));
     setImportText("");
     setImportState("idle");
@@ -919,6 +932,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
   const value = useMemo<PlanPilotContextValue>(
     () => ({
       tasks,
+      lastImportedTaskIds,
       proposal,
       importText,
       setImportText,
@@ -959,6 +973,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     }),
     [
       tasks,
+      lastImportedTaskIds,
       proposal,
       importText,
       importState,

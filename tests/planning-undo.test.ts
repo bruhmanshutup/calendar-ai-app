@@ -16,6 +16,7 @@ function snapshot(label: string): PlanningUndoSnapshot {
     planningMode: "balanced",
     selectedSessionIds: [],
     sessionReviews: [],
+    lastImportedTaskIds: [],
   };
 }
 

@@ -52,8 +52,18 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
   try {
-    const selected = provider();
-    const extracted = await selected.extractor.extractTasks(parsed.data);
+    let selected = provider();
+    let extracted: Awaited<ReturnType<TaskExtractionProvider["extractTasks"]>>;
+    try {
+      extracted = await selected.extractor.extractTasks(parsed.data);
+    } catch (error) {
+      if (selected.mode === "local") throw error;
+      selected = {
+        extractor: new MockTaskExtractionProvider(),
+        mode: "local",
+      };
+      extracted = await selected.extractor.extractTasks(parsed.data);
+    }
     const withOverdueRecovery = await recoverExplicitOverdueTasks(
       parsed.data,
       extracted,

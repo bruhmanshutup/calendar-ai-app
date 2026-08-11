@@ -1191,6 +1191,7 @@ p {
 .view-toggle { background: var(--surface-soft); border: 1px solid var(--line); border-radius: 7px; display: flex; padding: 2px; }
 .view-toggle button { align-items: center; background: transparent; border: 0; border-radius: 5px; color: var(--muted); display: flex; font-size: 9.5px; gap: 5px; padding: 6px 9px; }
 .view-toggle button.active { background: var(--surface); box-shadow: var(--shadow-sm); color: var(--ink); font-weight: 680; }
+.schedule-scope-toggle { margin-left: 9px; }
 .inline-check { align-items: center; color: var(--muted); display: flex; font-size: 9px; gap: 6px; margin-left: 15px; }
 .inline-check input { accent-color: var(--brand); }
 .schedule-range { color: var(--muted); font-size: 10px; font-weight: 620; margin-left: auto; }
@@ -1484,6 +1485,7 @@ p {
   .inline-check,
   .reasoning-all-button { margin-left: 0; }
   .schedule-undo-button { margin-left: 0; }
+  .schedule-scope-toggle { margin-left: 0; }
   .schedule-range { width: 100%; }
   .schedule-list-view > div { grid-template-columns: 1fr; }
   .list-day { text-align: left; }

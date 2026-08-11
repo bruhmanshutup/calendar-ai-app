@@ -38,27 +38,30 @@ export class OpenAITaskExtractionProvider
     input: ExtractionInput,
     repairMessage?: string,
   ): Promise<unknown> {
-    const response = await this.client.responses.parse({
-      model: this.model,
-      instructions: EXTRACTION_INSTRUCTIONS,
-      input: [
-        {
-          role: "user",
-          content: [
-            `Current local date: ${input.currentLocalDate}`,
-            `IANA time zone: ${input.timeZone}`,
-            repairMessage ? `Repair request: ${repairMessage}` : "",
-            "Source content:",
-            input.text,
-          ]
-            .filter(Boolean)
-            .join("\n"),
+    const response = await this.client.responses.parse(
+      {
+        model: this.model,
+        instructions: EXTRACTION_INSTRUCTIONS,
+        input: [
+          {
+            role: "user",
+            content: [
+              `Current local date: ${input.currentLocalDate}`,
+              `IANA time zone: ${input.timeZone}`,
+              repairMessage ? `Repair request: ${repairMessage}` : "",
+              "Source content:",
+              input.text,
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          },
+        ],
+        text: {
+          format: zodTextFormat(extractionResultSchema, "task_extraction"),
         },
-      ],
-      text: {
-        format: zodTextFormat(extractionResultSchema, "task_extraction"),
       },
-    });
+      { timeout: 20_000 },
+    );
     if (!response.output_parsed) {
       throw new TaskExtractionError(
         "INVALID_PROVIDER_OUTPUT",

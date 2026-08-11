@@ -134,8 +134,18 @@ function categoryFor(text: string): TaskCategory {
   return "personal";
 }
 
-function titleFor(text: string, datePhrase?: string): string {
+function markdownText(text: string): string {
   return text
+    .replace(/!?\[([^\]]+)]\([^)]+\)/g, "$1")
+    .replace(/<https?:\/\/[^>]+>/gi, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/[*_~`#]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function titleFor(text: string, datePhrase?: string): string {
+  return markdownText(text)
     .replace(/^\s*(?:[-*•]|\d+[.)]|\[[ x]\])\s*/i, "")
     .replace(/^(?:task|to-?do|action item|reminder)\s*:\s*/i, "")
     .replace(datePhrase ?? /$^/, " ")
@@ -211,6 +221,13 @@ function localWeekWindow(
 }
 
 function isFixedEvent(text: string): boolean {
+  if (
+    /\b(?:book|choose|confirm|request|schedule|select)\b.{0,60}\b(?:appointment|reservation)\b/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
   return /\b(appointment|meeting|class|flight|reservation|interview)\b/i.test(
     text,
   );
@@ -249,7 +266,7 @@ function priorityFor(
 }
 
 function hasActionVerb(text: string): boolean {
-  return /\b(?:apply|attend|book|bring|build|buy|call|clean|complete|create|deliver|do|draft|email|exercise|finish|fix|go|make|meet|pay|pick\s+up|practice|prepare|read|register|remember\s+to|renew|return|review|run|schedule|send|study|submit|take|turn\s+in|update|upload|wash|write)\b/i.test(
+  return /\b(?:apply|attend|book|bring|build|buy|call|choose|clean|complete|confirm|create|deliver|do|draft|email|exercise|finish|fix|go|make|meet|pay|pick\s+up|practice|prepare|read|register|remember\s+to|renew|reply|request|return|review|run|schedule|select|send|study|submit|take|turn\s+in|update|upload|view|waive|wash|write)\b/i.test(
     text,
   );
 }
@@ -263,6 +280,9 @@ function hasTaskNoun(text: string): boolean {
 function isClearlyNonTask(text: string): boolean {
   const trimmed = text.trim();
   return (
+    /^(?:tasks?\s+)?due\s+in\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(
+      trimmed,
+    ) ||
     /^(?:from|to|cc|bcc|subject|sent)\s*:/i.test(trimmed) ||
     /^(?:hi|hello|hey|thanks|thank you|best|regards|sincerely)[\s,!.-]*(?:\w+)?$/i.test(
       trimmed,
@@ -435,24 +455,27 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
     const ignoredStatements: ExtractionResult["ignoredStatements"] = [];
 
     lines.forEach((line, index) => {
+      const semanticLine = markdownText(line);
       const alternatingWithoutClock =
         /\b(?:every\s+(?:other|second|2(?:nd)?)\s+day|on\s+alternate\s+days?|alternat(?:e|ing)\b.{0,40}\bdays?|day\s+on[\s,/-]+day\s+off)\b/i.test(
-          line,
+          semanticLine,
         ) &&
         !/\b(?:[01]?\d|2[0-3]):[0-5]\d\s*(?:am|pm)?\b|\b(?:1[0-2]|0?[1-9])\s*(?:am|pm)\b/i.test(
-          line,
+          semanticLine,
         );
       const timedRecurrence = alternatingWithoutClock
         ? undefined
-        : parseTimedRecurrence(line, {
+        : parseTimedRecurrence(semanticLine, {
             currentLocalDate: input.currentLocalDate,
             timeZone: input.timeZone,
           });
-      const datePhrase = timedRecurrence ? undefined : extractDatePhrase(line);
-      if (!isTaskCandidate(line, datePhrase)) {
+      const datePhrase = timedRecurrence
+        ? undefined
+        : extractDatePhrase(semanticLine);
+      if (!isTaskCandidate(semanticLine, datePhrase)) {
         ignoredStatements.push({
           sourceText: line,
-          reason: ignoredReason(line),
+          reason: ignoredReason(semanticLine),
         });
         return;
       }
@@ -464,14 +487,17 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
           )
         : undefined;
       tasks.push(
-        buildTask(
-          line,
-          datePhrase,
-          interpreted,
-          input,
-          index,
-          timedRecurrence,
-        ),
+        {
+          ...buildTask(
+            semanticLine,
+            datePhrase,
+            interpreted,
+            input,
+            index,
+            timedRecurrence,
+          ),
+          sourceText: line,
+        },
       );
     });
 

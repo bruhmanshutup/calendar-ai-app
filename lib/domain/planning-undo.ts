@@ -14,6 +14,7 @@ export type PlanningUndoSnapshot = {
   replan?: ReplanProposal;
   selectedSessionIds: string[];
   sessionReviews: SessionReview[];
+  lastImportedTaskIds: string[];
 };
 
 const MAX_UNDO_STEPS = 20;
@@ -28,7 +29,8 @@ function representsSameState(
     left.planningMode === right.planningMode &&
     left.replan === right.replan &&
     left.selectedSessionIds === right.selectedSessionIds &&
-    left.sessionReviews === right.sessionReviews
+    left.sessionReviews === right.sessionReviews &&
+    left.lastImportedTaskIds === right.lastImportedTaskIds
   );
 }
 
