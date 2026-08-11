@@ -912,6 +912,74 @@ describe("deterministic scheduling", () => {
     });
   });
 
+  it("preserves committed work and schedules only the remaining task time", () => {
+    const committed = {
+      id: "session-work-1",
+      taskId: "work",
+      title: "Work",
+      start: "2026-07-27T10:00:00.000Z",
+      end: "2026-07-27T10:30:00.000Z",
+      locked: true,
+      status: "approved" as const,
+    };
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "work",
+            title: "Work",
+            estimatedMinutes: 60,
+            splittable: true,
+          }),
+        ],
+        { lockedSessions: [committed] },
+      ),
+    );
+
+    const workSessions = proposal.sessions.filter(
+      (session) => session.taskId === "work",
+    );
+    expect(workSessions).toHaveLength(2);
+    expect(workSessions.reduce((total, session) => total + session.minutes, 0)).toBe(
+      60,
+    );
+    expect(workSessions.map((session) => session.id)).toEqual([
+      "session-work-1",
+      "session-work-1-v2",
+    ]);
+  });
+
+  it("does not duplicate a preserved fixed-time responsibility", () => {
+    const fixed = task({
+      id: "appointment",
+      title: "Appointment",
+      taskType: "fixed_time",
+      fixedStartAt: "2026-07-27T10:00:00.000Z",
+      fixedEndAt: "2026-07-27T10:30:00.000Z",
+      estimatedMinutes: 30,
+    });
+    const proposal = generateSchedule(
+      scheduling([fixed], {
+        lockedSessions: [
+          {
+            id: "session-appointment-1",
+            taskId: "appointment",
+            title: "Appointment",
+            start: fixed.fixedStartAt!,
+            end: fixed.fixedEndAt!,
+            locked: true,
+            status: "approved",
+          },
+        ],
+      }),
+    );
+
+    expect(
+      proposal.sessions.filter((session) => session.taskId === "appointment"),
+    ).toHaveLength(1);
+    expect(proposal.unschedulable).toEqual([]);
+  });
+
   it("rejects minimum sessions larger than the configured maximum", () => {
     const proposal = generateSchedule(
       scheduling([

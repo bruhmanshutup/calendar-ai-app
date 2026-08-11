@@ -51,6 +51,51 @@ function intervalMinutes(interval: NumericInterval): number {
   return Math.max(0, Math.round((interval.end - interval.start) / MINUTE));
 }
 
+function sessionMinutes(start: string, end: string): number {
+  return intervalMinutes({
+    start: new Date(start).getTime(),
+    end: new Date(end).getTime(),
+  });
+}
+
+function committedMinutesForTask(
+  taskId: string,
+  input: SchedulingInput,
+): number {
+  return input.lockedSessions.reduce((total, session) => {
+    if (
+      session.taskId !== taskId ||
+      !["proposed", "approved"].includes(session.status)
+    ) {
+      return total;
+    }
+    return total + sessionMinutes(session.start, session.end);
+  }, 0);
+}
+
+function hasMatchingLockedSession(
+  taskId: string,
+  start: number,
+  end: number,
+  input: SchedulingInput,
+): boolean {
+  return input.lockedSessions.some(
+    (session) =>
+      session.taskId === taskId &&
+      new Date(session.start).getTime() === start &&
+      new Date(session.end).getTime() === end,
+  );
+}
+
+function uniqueSessionId(base: string, sessions: PlannedSession[]): string {
+  if (!sessions.some((session) => session.id === base)) return base;
+  let version = 2;
+  while (sessions.some((session) => session.id === `${base}-v${version}`)) {
+    version += 1;
+  }
+  return `${base}-v${version}`;
+}
+
 function overlaps(a: NumericInterval, b: NumericInterval): boolean {
   return a.start < b.end && b.start < a.end;
 }
@@ -812,6 +857,9 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       const end = new Date(task.fixedEndAt ?? "").getTime();
       const slot = { start, end };
       const minutes = intervalMinutes(slot);
+      if (hasMatchingLockedSession(task.id ?? task.title, start, end, input)) {
+        continue;
+      }
       if (
         !Number.isFinite(start) ||
         !Number.isFinite(end) ||
@@ -847,6 +895,16 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       let conflictedMinutes = 0;
       for (const [index, slot] of occurrences.entries()) {
         const minutes = intervalMinutes(slot);
+        if (
+          hasMatchingLockedSession(
+            task.id ?? task.title,
+            slot.start,
+            slot.end,
+            input,
+          )
+        ) {
+          continue;
+        }
         if (
           !explicitTimeIsAllowed(slot, input, availability) ||
           !isFree(slot, busy)
@@ -884,32 +942,43 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         ? Math.max(1, task.recurrence?.count ?? 1)
         : 1;
     const totalMinutes = estimate * occurrences;
+    const remainingMinutes = Math.max(
+      0,
+      totalMinutes -
+        (task.completedMinutes ?? 0) -
+        committedMinutesForTask(task.id ?? task.title, input),
+    );
+    if (remainingMinutes === 0) continue;
     const minimum =
       task.minimumSessionMinutes ?? SCHEDULER_INCREMENT_MINUTES;
     if (minimum > input.preferences.maximumBlockMinutes) {
       unschedulableTasks.push(
-        unschedulable(task, totalMinutes, "MINIMUM_SESSION_TOO_LARGE"),
+        unschedulable(task, remainingMinutes, "MINIMUM_SESSION_TOO_LARGE"),
       );
       continue;
     }
     const durations =
       task.taskType === "recurring_goal"
-        ? Array.from({ length: occurrences }, () => estimate)
+        ? Array.from(
+            { length: Math.ceil(remainingMinutes / estimate) },
+            (_, index) =>
+              Math.min(estimate, remainingMinutes - index * estimate),
+          )
         : task.splittable
           ? chunkDurations(
-              estimate,
+              remainingMinutes,
               input.preferences.preferredBlockMinutes,
               input.preferences.maximumBlockMinutes,
               minimum,
             )
-          : [estimate];
+          : [remainingMinutes];
     if (
       !task.splittable &&
       task.taskType !== "recurring_goal" &&
-      estimate > input.preferences.maximumBlockMinutes
+      remainingMinutes > input.preferences.maximumBlockMinutes
     ) {
       unschedulableTasks.push(
-        unschedulable(task, estimate, "MINIMUM_SESSION_TOO_LARGE"),
+        unschedulable(task, remainingMinutes, "MINIMUM_SESSION_TOO_LARGE"),
       );
       continue;
     }
@@ -940,7 +1009,10 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         unscheduledMinutes += minutes;
         continue;
       }
-      const sessionId = `session-${task.id}-${index + 1}`;
+      const sessionId = uniqueSessionId(
+        `session-${task.id}-${index + 1}`,
+        sessions,
+      );
       const session: PlannedSession = {
         id: sessionId,
         taskId: task.id ?? task.title,

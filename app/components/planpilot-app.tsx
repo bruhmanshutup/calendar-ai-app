@@ -1146,7 +1146,7 @@ function ImportView() {
           <div className="state-card state-success">
             <CheckCircle2 size={20} />
             <div>
-              <strong>{tasks.length} responsibilities found</strong>
+              <strong>{tasks.length} responsibilities in your plan</strong>
               <p>
                 {tasks.filter((task) => task.reviewRequired).length} need a quick review before scheduling. {" "}
                 {extractionMode !== "local"

@@ -12,6 +12,7 @@ import {
 import { fromZonedTime } from "date-fns-tz";
 import { DEFAULT_PREFERENCES } from "@/lib/defaults";
 import { generateSchedule } from "@/lib/domain/scheduler";
+import { mergeImportedTasks } from "@/lib/domain/task-import";
 import { proposeMinimalReplan } from "@/lib/domain/rescheduler";
 import {
   canRecordSessionOutcome,
@@ -28,6 +29,7 @@ import type {
   PlanningMode,
   ReplanProposal,
   ScheduleProposal,
+  ScheduledBreak,
   SchedulingInput,
   SessionOutcome,
   SessionReview,
@@ -101,6 +103,7 @@ function schedulingBase(
   planningMode: PlanningMode,
   tasks: ExtractedTask[] = [],
   lockedSessions: ExistingSession[] = [],
+  protectedBreaks: ScheduledBreak[] = [],
 ): Omit<SchedulingInput, "tasks"> {
   const now = new Date(Math.ceil(Date.now() / (15 * MINUTE)) * 15 * MINUTE);
   const latestRelevantDate = tasks.reduce((latest, task) => {
@@ -151,7 +154,7 @@ function schedulingBase(
     allowExplicitTimesOutsideAvailability: true,
     availability,
     unavailableEvents: [],
-    blockedTimes: [],
+    blockedTimes: protectedBreaks.map(({ start, end }) => ({ start, end })),
     lockedSessions,
     preferences: { ...DEFAULT_PREFERENCES, planningMode },
   };
@@ -160,11 +163,28 @@ function schedulingBase(
 function scheduleFor(
   tasks: ExtractedTask[],
   planningMode: PlanningMode,
+  preservedSessions: PlannedSession[] = [],
+  preservedBreaks: ScheduledBreak[] = [],
 ): ScheduleProposal {
-  return generateSchedule({
-    ...schedulingBase(planningMode, tasks),
+  const proposal = generateSchedule({
+    ...schedulingBase(
+      planningMode,
+      tasks,
+      preservedSessions.map(asExisting),
+      preservedBreaks,
+    ),
     tasks: tasks.filter((task) => !task.completed && !task.cancelled),
   });
+  const preservedById = new Map(
+    preservedSessions.map((session) => [session.id, session]),
+  );
+  proposal.sessions = proposal.sessions.map(
+    (session) => preservedById.get(session.id) ?? session,
+  );
+  proposal.breaks = [...preservedBreaks, ...proposal.breaks].sort(
+    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
+  );
+  return proposal;
 }
 
 function asExisting(session: PlannedSession): ExistingSession {
@@ -347,23 +367,46 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         throw new Error(body.error?.message ?? "Extraction failed.");
       }
       const extractedTasks = body.tasks;
-      setTasks(extractedTasks);
+      const merged = mergeImportedTasks(tasks, extractedTasks);
+      const preservedSessions = proposal.sessions.filter(
+        (session) => session.status !== "proposed" || session.locked,
+      );
+      const preservedSessionIds = new Set(
+        preservedSessions.map((session) => session.id),
+      );
+      const preservedBreaks = proposal.breaks.filter((item) =>
+        preservedSessionIds.has(item.afterSessionId),
+      );
+      setTasks(merged.tasks);
       setExtractionMode(body.extractionMode);
-      refresh(extractedTasks);
+      setProposal(
+        scheduleFor(
+          merged.tasks,
+          planningMode,
+          preservedSessions,
+          preservedBreaks,
+        ),
+      );
+      setReplan(undefined);
       setImportState("success");
       setHistory((items) => [
         {
           id: `history-import-${Date.now()}`,
           at: nowLabel(),
           icon: "edit",
-          title: `${extractedTasks.length} responsibilities interpreted`,
+          title: `${merged.addedTasks.length} responsibilities added`,
           detail:
             body.extractionMode !== "local"
-              ? `${body.extractionMode === "gemini" ? "Gemini" : "OpenAI"} estimated effort and session length; source text remains available for review.`
-              : "Local fallback estimates were used; source text remains available for review.",
+              ? `${body.extractionMode === "gemini" ? "Gemini" : "OpenAI"} estimated effort and session length; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were skipped.` : ""}`
+              : `Local fallback estimates were used; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were skipped.` : ""}`,
         },
         ...items,
       ]);
+      setToast(
+        merged.addedTasks.length > 0
+          ? `${merged.addedTasks.length} responsibilities added. Existing commitments were preserved.`
+          : "Those responsibilities are already in your plan.",
+      );
     } catch (error) {
       setImportState("error");
       setImportError(
@@ -372,7 +415,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           : "Extraction failed. Your text is still here to retry.",
       );
     }
-  }, [importText, refresh]);
+  }, [importText, planningMode, proposal, tasks]);
 
   const updateTask = useCallback(
     (id: string, patch: Partial<ExtractedTask>) => {
