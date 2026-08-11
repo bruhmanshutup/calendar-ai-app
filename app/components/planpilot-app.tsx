@@ -1689,9 +1689,7 @@ function ScheduleView() {
     undoSchedule,
   } = usePlanPilot();
   const [mode, setMode] = useState<"week" | "list">("week");
-  const [scope, setScope] = useState<"recent" | "all">(
-    lastImportedTaskIds.length > 0 ? "recent" : "all",
-  );
+  const [scope, setScope] = useState<"recent" | "all">("all");
   const [expandedReasonIds, setExpandedReasonIds] = useState<string[]>([]);
   const latestTaskIds = new Set(lastImportedTaskIds);
   const visibleSessions = proposal.sessions.filter(
