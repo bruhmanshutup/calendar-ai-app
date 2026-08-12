@@ -289,14 +289,24 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         if (active && body.state) {
           const saved = parsePersistedWorkspace(body.state);
           setTasks(saved.tasks);
-          const hasCommittedSessions = saved.proposal.sessions.some(
+          const preservedSessions = saved.proposal.sessions.filter(
             (session) => session.status !== "proposed",
           );
+          const preservedSessionIds = new Set(
+            preservedSessions.map((session) => session.id),
+          );
+          const preservedBreaks = saved.proposal.breaks.filter((item) =>
+            preservedSessionIds.has(item.afterSessionId),
+          );
           setProposal(
-            saved.schedulerVersion === CURRENT_SCHEDULER_VERSION ||
-              hasCommittedSessions
+            saved.schedulerVersion === CURRENT_SCHEDULER_VERSION
               ? saved.proposal
-              : scheduleFor(saved.tasks, saved.planningMode),
+              : scheduleFor(
+                  saved.tasks,
+                  saved.planningMode,
+                  preservedSessions,
+                  preservedBreaks,
+                ),
           );
           setImportText(saved.importText);
           setHistory(saved.history);
