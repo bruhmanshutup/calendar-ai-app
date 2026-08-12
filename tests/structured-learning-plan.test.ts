@@ -135,6 +135,14 @@ describe("structured learning plan recovery", () => {
     expect(recovered.tasks.at(-1)).toMatchObject({
       estimatedMinutes: 90,
       category: "school",
+      sequence: {
+        groupId: expect.stringMatching(/^structured-plan-/),
+        order: 12002,
+        week: 12,
+        day: 2,
+        anchorDate: "2026-08-12",
+        minimumGapDays: 1,
+      },
       sourceText:
         "Week 12 — Final Portfolio Project\n☐ Day 2: Write a 1–2 page report with results and lessons learned.",
     });

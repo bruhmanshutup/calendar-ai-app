@@ -40,6 +40,16 @@ export const extractedTaskSchema = z
     energyDemand: z.enum(["low", "medium", "high"]),
     splittable: z.boolean(),
     minimumSessionMinutes: z.number().int().positive().max(240).optional(),
+    sequence: z
+      .object({
+        groupId: z.string().trim().min(1).max(120),
+        order: z.number().int().nonnegative().max(1_000_000),
+        week: z.number().int().positive().max(1_000).optional(),
+        day: z.number().int().positive().max(366).optional(),
+        anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        minimumGapDays: z.number().int().min(0).max(31).optional(),
+      })
+      .optional(),
     recurrence: z
       .object({
         frequency: z.enum(["daily", "weekly", "monthly"]),

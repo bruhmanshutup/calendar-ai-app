@@ -16,6 +16,8 @@ const EXPLANATIONS: Record<ScheduleReasonCode, string> = {
   FINAL_VALID_OPENING: "This was the final valid opening before the deadline.",
   STABILITY_PRESERVED: "Kept in place to minimize disruption.",
   MOVED_AFTER_MISSED: "Moved because the earlier session was marked missed.",
+  SEQUENCE_ORDER:
+    "Placed after the preceding plan step so the Week/Day progression stays in order.",
   FIXED_TIME: "Kept at the explicit fixed time from the source.",
 };
 

@@ -1037,4 +1037,93 @@ describe("deterministic scheduling", () => {
     );
     expect(proposal.sessions.filter((session) => session.taskId === "weekend")).toHaveLength(0);
   });
+
+  it("keeps a Week/Day learning plan on its linear daily progression", () => {
+    const availability = Array.from({ length: 14 }, (_, index) => {
+      const date = new Date(Date.UTC(2026, 6, 27 + index));
+      const day = date.toISOString().slice(0, 10);
+      return {
+        start: `${day}T08:00:00.000Z`,
+        end: `${day}T18:00:00.000Z`,
+      };
+    });
+    const planTasks = [
+      ...Array.from({ length: 5 }, (_, index) => [1, index + 1] as const),
+      ...Array.from({ length: 3 }, (_, index) => [2, index + 1] as const),
+    ].map(([week, day]) =>
+      task({
+        id: `structured-plan-w${String(week).padStart(3, "0")}-d${String(day).padStart(3, "0")}`,
+        title: `Week ${week}, Day ${day}: Lesson ${week}.${day}`,
+        sequence: {
+          groupId: "cooling-plan",
+          order: week * 1_000 + day,
+          week,
+          day,
+          anchorDate: "2026-07-27",
+          minimumGapDays: 1,
+        },
+      }),
+    );
+    const proposal = generateSchedule(
+      scheduling(planTasks, {
+        windowEnd: "2026-08-10T22:00:00.000Z",
+        availability,
+      }),
+    );
+    const planSessions = proposal.sessions.filter((session) =>
+      session.taskId.startsWith("structured-plan-"),
+    );
+
+    expect(planSessions).toHaveLength(8);
+    expect(planSessions.map((session) => session.start.slice(0, 10))).toEqual([
+      "2026-07-27",
+      "2026-07-28",
+      "2026-07-29",
+      "2026-07-30",
+      "2026-07-31",
+      "2026-08-03",
+      "2026-08-04",
+      "2026-08-05",
+    ]);
+    expect(
+      planSessions.every((session) =>
+        session.reasonCodes.includes("SEQUENCE_ORDER"),
+      ),
+    ).toBe(true);
+    expect(proposal.unschedulable).toHaveLength(0);
+  });
+
+  it("holds later plan steps when an earlier step cannot be placed", () => {
+    const sequence = (week: number, day: number) => ({
+      groupId: "blocked-plan",
+      order: week * 1_000 + day,
+      week,
+      day,
+      anchorDate: "2026-07-27",
+      minimumGapDays: 1,
+    });
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "structured-plan-w001-d001",
+          title: "Week 1, Day 1: Oversized lab",
+          estimatedMinutes: 120,
+          minimumSessionMinutes: 120,
+          splittable: true,
+          sequence: sequence(1, 1),
+        }),
+        task({
+          id: "structured-plan-w001-d002",
+          title: "Week 1, Day 2: Follow-up lesson",
+          sequence: sequence(1, 2),
+        }),
+      ]),
+    );
+
+    expect(proposal.sessions).toHaveLength(0);
+    expect(proposal.unschedulable.map((item) => item.reasonCode)).toEqual([
+      "MINIMUM_SESSION_TOO_LARGE",
+      "SEQUENCE_BLOCKED",
+    ]);
+  });
 });

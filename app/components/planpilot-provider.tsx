@@ -12,6 +12,7 @@ import {
 import { fromZonedTime } from "date-fns-tz";
 import { DEFAULT_PREFERENCES } from "@/lib/defaults";
 import { generateSchedule } from "@/lib/domain/scheduler";
+import { latestSequenceTargetDate } from "@/lib/domain/task-sequence";
 import { mergeImportedTasks } from "@/lib/domain/task-import";
 import {
   popPlanningUndo,
@@ -94,7 +95,7 @@ type PlanPilotContextValue = {
 const Context = createContext<PlanPilotContextValue | null>(null);
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
-const CURRENT_SCHEDULER_VERSION = 7;
+const CURRENT_SCHEDULER_VERSION = 8;
 
 function currentLocalDate(timeZone: string, instant = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -116,6 +117,17 @@ function schedulingBase(
   protectedBreaks: ScheduledBreak[] = [],
 ): Omit<SchedulingInput, "tasks"> {
   const now = new Date(Math.ceil(Date.now() / (15 * MINUTE)) * 15 * MINUTE);
+  const planningLocalDate = currentLocalDate(DEFAULT_PREFERENCES.timeZone, now);
+  const latestSequenceDate = latestSequenceTargetDate(
+    tasks,
+    planningLocalDate,
+  );
+  const latestSequenceTime = latestSequenceDate
+    ? fromZonedTime(
+        `${latestSequenceDate}T${DEFAULT_PREFERENCES.sleepingTime}:00`,
+        DEFAULT_PREFERENCES.timeZone,
+      ).getTime()
+    : Number.NEGATIVE_INFINITY;
   const latestRelevantDate = tasks.reduce((latest, task) => {
     const values = [
       task.dueAt,
@@ -132,9 +144,9 @@ function schedulingBase(
       .map((value) => new Date(value).getTime())
       .filter(Number.isFinite);
     return Math.max(latest, ...values);
-  }, now.getTime() + 7 * DAY);
+  }, Math.max(now.getTime() + 7 * DAY, latestSequenceTime));
   const horizonDays = Math.min(
-    35,
+    120,
     Math.max(8, Math.ceil((latestRelevantDate - now.getTime()) / DAY) + 1),
   );
   const availability = Array.from({ length: horizonDays }, (_, index) => {

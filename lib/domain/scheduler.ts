@@ -15,6 +15,11 @@ import {
 import { dateOnlyPlanningDeadline } from "./date-interpretation";
 import { explainReasons } from "./explanations";
 import { recurrenceTimesForDay } from "./recurrence";
+import {
+  sequenceTargetDate,
+  taskSequence,
+  type TaskSequenceDescriptor,
+} from "./task-sequence";
 import type {
   DayOfWeek,
   ExtractedTask,
@@ -34,11 +39,29 @@ type NumericInterval = { start: number; end: number };
 type Candidate = {
   start: number;
   end: number;
+  localDate: string;
   score: number;
   reasons: ScheduleReasonCode[];
 };
 
+type SequenceProgress = {
+  blocked: boolean;
+  lastDate?: string;
+};
+
 type TimedOccurrence = NumericInterval & { date: string; time: string };
+
+type LocalParts = { date: string; minutes: number; weekday: string };
+
+type CandidateDayLoad = {
+  sessionCount: number;
+  minutes: number;
+  taskOccurrences: number;
+};
+
+const LOCAL_PARTS_CACHE_LIMIT = 20_000;
+const localPartsCache = new Map<string, LocalParts>();
+const localPartsFormatters = new Map<string, Intl.DateTimeFormat>();
 
 function toNumeric(interval: TimeInterval): NumericInterval {
   return {
@@ -138,24 +161,36 @@ function ceilToIncrement(value: number): number {
 function localParts(
   instant: number,
   timeZone: string,
-): { date: string; minutes: number; weekday: string } {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(instant));
+): LocalParts {
+  const cacheKey = `${timeZone}:${instant}`;
+  const cached = localPartsCache.get(cacheKey);
+  if (cached) return cached;
+
+  let formatter = localPartsFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      weekday: "long",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    localPartsFormatters.set(timeZone, formatter);
+  }
+  const parts = formatter.formatToParts(new Date(instant));
   const value = (type: Intl.DateTimeFormatPartTypes): string =>
     parts.find((part) => part.type === type)?.value ?? "";
-  return {
+  const result = {
     date: `${value("year")}-${value("month")}-${value("day")}`,
     minutes: Number(value("hour")) * 60 + Number(value("minute")),
     weekday: value("weekday").toLocaleLowerCase(),
   };
+  if (localPartsCache.size >= LOCAL_PARTS_CACHE_LIMIT) localPartsCache.clear();
+  localPartsCache.set(cacheKey, result);
+  return result;
 }
 
 function calendarDistance(
@@ -321,6 +356,115 @@ function taskRisk(
     80 / hoursRemaining +
     PRIORITY_WEIGHT[task.priority]
   );
+}
+
+function tasksInSchedulingOrder(
+  tasks: ExtractedTask[],
+  input: SchedulingInput,
+  availability: NumericInterval[],
+  busy: NumericInterval[],
+): ExtractedTask[] {
+  const standalone: ExtractedTask[] = [];
+  const sequenceGroups = new Map<
+    string,
+    Array<{ task: ExtractedTask; sequence: TaskSequenceDescriptor }>
+  >();
+
+  tasks.forEach((task) => {
+    const sequence = taskSequence(task);
+    if (!sequence) {
+      standalone.push(task);
+      return;
+    }
+    const group = sequenceGroups.get(sequence.groupId) ?? [];
+    group.push({ task, sequence });
+    sequenceGroups.set(sequence.groupId, group);
+  });
+  sequenceGroups.forEach((group) =>
+    group.sort(
+      (first, second) =>
+        first.sequence.order - second.sequence.order ||
+        (first.task.id ?? "").localeCompare(second.task.id ?? ""),
+    ),
+  );
+
+  const ready: Array<{ task: ExtractedTask; groupId?: string }> = [
+    ...standalone.map((task) => ({ task })),
+    ...[...sequenceGroups.entries()].flatMap(([groupId, group]) => {
+      const next = group.shift();
+      return next ? [{ task: next.task, groupId }] : [];
+    }),
+  ];
+  const ordered: ExtractedTask[] = [];
+  while (ready.length > 0) {
+    ready.sort(
+      (first, second) =>
+        taskRisk(second.task, input, availability, busy) -
+          taskRisk(first.task, input, availability, busy) ||
+        (first.task.id ?? "").localeCompare(second.task.id ?? ""),
+    );
+    const next = ready.shift();
+    if (!next) break;
+    ordered.push(next.task);
+    if (!next.groupId) continue;
+    const following = sequenceGroups.get(next.groupId)?.shift();
+    if (following) ready.push({ task: following.task, groupId: next.groupId });
+  }
+  return ordered;
+}
+
+function sequenceEarliestStart(
+  sequence: TaskSequenceDescriptor,
+  progress: SequenceProgress,
+  input: SchedulingInput,
+): number {
+  const windowStart = new Date(input.windowStart).getTime();
+  const fallbackAnchor = localParts(
+    windowStart,
+    input.preferences.timeZone,
+  ).date;
+  let earliestDate = sequenceTargetDate(sequence, fallbackAnchor);
+  if (progress.lastDate) {
+    const afterPredecessor = format(
+      addDays(parseISO(progress.lastDate), sequence.minimumGapDays),
+      "yyyy-MM-dd",
+    );
+    if (afterPredecessor > earliestDate) earliestDate = afterPredecessor;
+  }
+  return Math.max(
+    windowStart,
+    fromZonedTime(
+      `${earliestDate}T00:00:00`,
+      input.preferences.timeZone,
+    ).getTime(),
+  );
+}
+
+function updateSequenceProgress(
+  progress: SequenceProgress,
+  task: ExtractedTask,
+  sessions: PlannedSession[],
+  input: SchedulingInput,
+): void {
+  const taskId = task.id ?? task.title;
+  const latestDate = sessions
+    .filter((session) => session.taskId === taskId)
+    .map((session) =>
+      localParts(
+        new Date(session.start).getTime(),
+        input.preferences.timeZone,
+      ).date,
+    )
+    .sort()
+    .at(-1);
+  const fallbackDate = localParts(
+    new Date(input.windowStart).getTime(),
+    input.preferences.timeZone,
+  ).date;
+  const completedDate = latestDate ?? fallbackDate;
+  if (!progress.lastDate || completedDate > progress.lastDate) {
+    progress.lastDate = completedDate;
+  }
 }
 
 function timedOccurrenceSlots(
@@ -492,30 +636,19 @@ function candidateScore(
   start: number,
   deadline: number,
   input: SchedulingInput,
-  sessions: PlannedSession[],
+  local: LocalParts,
+  dayLoad: CandidateDayLoad | undefined,
 ): number {
   const mode = PLANNING_MODE_CONFIG[input.preferences.planningMode];
-  const local = localParts(start, input.preferences.timeZone);
   const focusMatch = input.preferences.preferredFocusWindows.some((window) =>
     isInClockWindow(local.minutes, window),
   );
   const routineMatch = input.preferences.preferredRoutineWindows.some(
     (window) => isInClockWindow(local.minutes, window),
   );
-  const sameDaySessions = sessions.filter(
-    (session) =>
-      localParts(
-        new Date(session.start).getTime(),
-        input.preferences.timeZone,
-      ).date === local.date,
-  );
-  const sameTaskDayOccurrences = sameDaySessions.filter(
-    (session) => session.taskId === task.id,
-  ).length;
-  const sameDayMinutes = sameDaySessions.reduce(
-    (total, session) => total + session.minutes,
-    0,
-  );
+  const sameTaskDayOccurrences = dayLoad?.taskOccurrences ?? 0;
+  const sameDayMinutes = dayLoad?.minutes ?? 0;
+  const sameDaySessionCount = dayLoad?.sessionCount ?? 0;
   const windowStart = new Date(input.windowStart).getTime();
   const windowEnd = new Date(input.windowEnd).getTime();
 
@@ -553,7 +686,7 @@ function candidateScore(
   let score =
     PRIORITY_WEIGHT[task.priority] +
     -distanceFromTargetHours * 1.5 -
-    (sameDayMinutes * 0.45 + sameDaySessions.length * 20) *
+    (sameDayMinutes * 0.45 + sameDaySessionCount * 20) *
       distributionWeight -
     sameTaskDayOccurrences * 80 +
     mode.earlyCompletionWeight *
@@ -587,17 +720,51 @@ function findCandidate(
   sessions: PlannedSession[],
   demandingByDay: Map<string, number>,
   wasSplit: boolean,
+  earliestStart?: number,
 ): Candidate | undefined {
   const mode = PLANNING_MODE_CONFIG[input.preferences.planningMode];
   const taskSessions = sessions.filter((session) => session.taskId === task.id);
-  const candidates: Candidate[] = [];
+  const dayLoads = new Map<string, CandidateDayLoad>();
+  for (const session of sessions) {
+    const date = localParts(
+      new Date(session.start).getTime(),
+      input.preferences.timeZone,
+    ).date;
+    const load = dayLoads.get(date) ?? {
+      sessionCount: 0,
+      minutes: 0,
+      taskOccurrences: 0,
+    };
+    load.sessionCount += 1;
+    load.minutes += session.minutes;
+    if (session.taskId === task.id) load.taskOccurrences += 1;
+    dayLoads.set(date, load);
+  }
+  let bestCandidate: Candidate | undefined;
   const increment = SCHEDULER_INCREMENT_MINUTES * MINUTE;
   const breakMinutes =
     task.energyDemand === "high" ? input.preferences.preferredBreakMinutes : 0;
+  let firstSequenceCandidateDate: string | undefined;
 
   for (const interval of availability) {
+    const intervalStart = Math.max(
+      interval.start,
+      earliestStart ?? Number.NEGATIVE_INFINITY,
+    );
+    if (intervalStart >= interval.end) continue;
+    const intervalDate = localParts(
+      intervalStart,
+      input.preferences.timeZone,
+    ).date;
+    if (
+      earliestStart !== undefined &&
+      firstSequenceCandidateDate &&
+      intervalDate > firstSequenceCandidateDate
+    ) {
+      break;
+    }
     for (
-      let start = ceilToIncrement(interval.start);
+      let start = ceilToIncrement(intervalStart);
       start + minutes * MINUTE <= Math.min(interval.end, deadline);
       start += increment
     ) {
@@ -612,6 +779,7 @@ function findCandidate(
         ? new Date(task.recurrence.windowStart).getTime()
         : Number.NEGATIVE_INFINITY;
       if (
+        (earliestStart !== undefined && start < earliestStart) ||
         start < recurrenceStart ||
         !quotaRecurrenceAllowsDate(
           task,
@@ -644,10 +812,10 @@ function findCandidate(
       ) {
         continue;
       }
-      if (!isInside(slot, availability) || !isFree(slot, busy)) continue;
+      if (!isFree(slot, busy)) continue;
       if (
         breakMinutes > 0 &&
-        (!isInside(breakSlot, availability) || !isFree(breakSlot, busy))
+        (breakSlot.end > interval.end || !isFree(breakSlot, busy))
       ) {
         continue;
       }
@@ -669,17 +837,34 @@ function findCandidate(
       if (task.taskType === "recurring_goal" && taskSessions.length > 0) {
         reasons.push("RECURRING_SPACING");
       }
-      candidates.push({
+      const candidate: Candidate = {
         start,
         end,
-        score: candidateScore(task, start, deadline, input, sessions),
+        localDate: local.date,
+        score: candidateScore(
+          task,
+          start,
+          deadline,
+          input,
+          local,
+          dayLoads.get(local.date),
+        ),
         reasons: [...new Set(reasons)],
-      });
+      };
+      const candidateIsBetter =
+        !bestCandidate ||
+        (earliestStart !== undefined
+          ? candidate.localDate.localeCompare(bestCandidate.localDate) ||
+            bestCandidate.score - candidate.score ||
+            candidate.start - bestCandidate.start
+          : bestCandidate.score - candidate.score ||
+            candidate.start - bestCandidate.start) < 0;
+      if (candidateIsBetter) bestCandidate = candidate;
+      if (earliestStart !== undefined) firstSequenceCandidateDate ??= local.date;
     }
   }
 
-  candidates.sort((a, b) => b.score - a.score || a.start - b.start);
-  return candidates[0];
+  return bestCandidate;
 }
 
 function chunkDurations(
@@ -752,6 +937,15 @@ function unschedulable(
       actions: [
         "Resolve the calendar conflict",
         "Correct the extracted fixed time",
+      ],
+    },
+    SEQUENCE_BLOCKED: {
+      explanation:
+        "This plan step is waiting because an earlier Week/Day step could not be scheduled.",
+      actions: [
+        "Schedule or complete the earlier plan step",
+        "Open more time for the plan",
+        "Reduce the earlier step's effort estimate",
       ],
     },
     MINIMUM_SESSION_TOO_LARGE: {
@@ -829,17 +1023,38 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
     ) * SCHEDULER_INCREMENT_MINUTES;
   let newlyPlannedMinutes = 0;
 
-  const normalizedTasks = input.tasks
-    .map((task, index) => ({ ...task, id: task.id ?? `task-${index + 1}` }))
-    .sort(
-      (a, b) =>
-        taskRisk(b, input, availability, busy) -
-          taskRisk(a, input, availability, busy) ||
-        (a.id ?? "").localeCompare(b.id ?? ""),
-    );
+  const normalizedTasks = tasksInSchedulingOrder(
+    input.tasks.map((task, index) => ({
+      ...task,
+      id: task.id ?? `task-${index + 1}`,
+    })),
+    input,
+    availability,
+    busy,
+  );
+  const sequenceProgress = new Map<string, SequenceProgress>();
 
   for (const task of normalizedTasks) {
     const estimate = task.estimatedMinutes ?? 0;
+    const sequence = taskSequence(task);
+    const progress = sequence
+      ? (sequenceProgress.get(sequence.groupId) ?? {
+          blocked: false,
+        })
+      : undefined;
+    if (sequence && progress) {
+      sequenceProgress.set(sequence.groupId, progress);
+      if (progress.blocked) {
+        unschedulableTasks.push(
+          unschedulable(task, estimate, "SEQUENCE_BLOCKED"),
+        );
+        continue;
+      }
+    }
+    const earliestSequenceStart =
+      sequence && progress
+        ? sequenceEarliestStart(sequence, progress, input)
+        : undefined;
     if (
       task.reviewRequired ||
       (task.taskType === "fixed_time" &&
@@ -849,6 +1064,7 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       unschedulableTasks.push(
         unschedulable(task, estimate, "MISSING_REQUIRED_INFORMATION"),
       );
+      if (progress) progress.blocked = true;
       continue;
     }
 
@@ -858,20 +1074,26 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       const slot = { start, end };
       const minutes = intervalMinutes(slot);
       if (hasMatchingLockedSession(task.id ?? task.title, start, end, input)) {
+        if (progress) updateSequenceProgress(progress, task, sessions, input);
         continue;
       }
       if (
         !Number.isFinite(start) ||
         !Number.isFinite(end) ||
+        (earliestSequenceStart !== undefined &&
+          start < earliestSequenceStart) ||
         !explicitTimeIsAllowed(slot, input, availability) ||
         !isFree(slot, busy)
       ) {
         unschedulableTasks.push(
           unschedulable(task, minutes || estimate, "FIXED_TIME_CONFLICT"),
         );
+        if (progress) progress.blocked = true;
         continue;
       }
-      const reasons: ScheduleReasonCode[] = ["FIXED_TIME"];
+      const reasons: ScheduleReasonCode[] = sequence
+        ? ["FIXED_TIME", "SEQUENCE_ORDER"]
+        : ["FIXED_TIME"];
       const session: PlannedSession = {
         id: `session-${task.id}-1`,
         taskId: task.id ?? task.title,
@@ -887,6 +1109,7 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       sessions.push(session);
       busy.push(slot);
       newlyPlannedMinutes += minutes;
+      if (progress) updateSequenceProgress(progress, task, sessions, input);
       continue;
     }
 
@@ -906,13 +1129,17 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
           continue;
         }
         if (
+          (earliestSequenceStart !== undefined &&
+            slot.start < earliestSequenceStart) ||
           !explicitTimeIsAllowed(slot, input, availability) ||
           !isFree(slot, busy)
         ) {
           conflictedMinutes += minutes;
           continue;
         }
-        const reasons: ScheduleReasonCode[] = ["FIXED_TIME"];
+        const reasons: ScheduleReasonCode[] = sequence
+          ? ["FIXED_TIME", "SEQUENCE_ORDER"]
+          : ["FIXED_TIME"];
         const session: PlannedSession = {
           id: `session-${task.id}-${slot.date}-${slot.time.replace(":", "")}-${index + 1}`,
           taskId: task.id ?? task.title,
@@ -933,6 +1160,9 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         unschedulableTasks.push(
           unschedulable(task, conflictedMinutes, "FIXED_TIME_CONFLICT"),
         );
+        if (progress) progress.blocked = true;
+      } else if (progress) {
+        updateSequenceProgress(progress, task, sessions, input);
       }
       continue;
     }
@@ -948,13 +1178,17 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         (task.completedMinutes ?? 0) -
         committedMinutesForTask(task.id ?? task.title, input),
     );
-    if (remainingMinutes === 0) continue;
+    if (remainingMinutes === 0) {
+      if (progress) updateSequenceProgress(progress, task, sessions, input);
+      continue;
+    }
     const minimum =
       task.minimumSessionMinutes ?? SCHEDULER_INCREMENT_MINUTES;
     if (minimum > input.preferences.maximumBlockMinutes) {
       unschedulableTasks.push(
         unschedulable(task, remainingMinutes, "MINIMUM_SESSION_TOO_LARGE"),
       );
+      if (progress) progress.blocked = true;
       continue;
     }
     const durations =
@@ -980,6 +1214,7 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       unschedulableTasks.push(
         unschedulable(task, remainingMinutes, "MINIMUM_SESSION_TOO_LARGE"),
       );
+      if (progress) progress.blocked = true;
       continue;
     }
 
@@ -1004,11 +1239,13 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         sessions,
         demandingByDay,
         durations.length > 1,
+        earliestSequenceStart,
       );
       if (!candidate) {
         unscheduledMinutes += minutes;
         continue;
       }
+      if (sequence) candidate.reasons.push("SEQUENCE_ORDER");
       const sessionId = uniqueSessionId(
         `session-${task.id}-${index + 1}`,
         sessions,
@@ -1065,6 +1302,9 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
             : "INSUFFICIENT_CAPACITY",
         ),
       );
+      if (progress) progress.blocked = true;
+    } else if (progress) {
+      updateSequenceProgress(progress, task, sessions, input);
     }
   }
 

@@ -39,6 +39,14 @@ export type ExtractedTask = {
   energyDemand: EnergyDemand;
   splittable: boolean;
   minimumSessionMinutes?: number;
+  sequence?: {
+    groupId: string;
+    order: number;
+    week?: number;
+    day?: number;
+    anchorDate?: string;
+    minimumGapDays?: number;
+  };
   recurrence?: {
     frequency: "daily" | "weekly" | "monthly";
     mode?: "quota" | "fixed_times";
@@ -164,6 +172,7 @@ export type ScheduleReasonCode =
   | "FINAL_VALID_OPENING"
   | "STABILITY_PRESERVED"
   | "MOVED_AFTER_MISSED"
+  | "SEQUENCE_ORDER"
   | "FIXED_TIME";
 
 export type PlannedSession = {
@@ -205,6 +214,7 @@ export type UnschedulableTask = {
     | "NO_VALID_TIME_BEFORE_DEADLINE"
     | "MISSING_REQUIRED_INFORMATION"
     | "FIXED_TIME_CONFLICT"
+    | "SEQUENCE_BLOCKED"
     | "MINIMUM_SESSION_TOO_LARGE";
   explanation: string;
   suggestedActions: string[];

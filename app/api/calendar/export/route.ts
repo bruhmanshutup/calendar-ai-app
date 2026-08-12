@@ -25,6 +25,7 @@ const sessionSchema = z.object({
       "FINAL_VALID_OPENING",
       "STABILITY_PRESERVED",
       "MOVED_AFTER_MISSED",
+      "SEQUENCE_ORDER",
       "FIXED_TIME",
     ]),
   ),

@@ -17,6 +17,7 @@ type StructuredPlanItem = {
 type StructuredPlan = {
   items: StructuredPlanItem[];
   weekCount: number;
+  title?: string;
 };
 
 const WEEK_HEADING =
@@ -48,6 +49,7 @@ export function parseStructuredLearningPlan(
   let currentWeekTitle = "";
   let currentGoal: string | undefined;
   let inChecklist = false;
+  let title: string | undefined;
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -62,6 +64,8 @@ export function parseStructuredLearningPlan(
       weeks.add(currentWeek);
       continue;
     }
+
+    if (currentWeek === undefined && !title) title = line;
 
     if (currentWeek === undefined) continue;
     const goal = GOAL_LINE.exec(line);
@@ -90,7 +94,7 @@ export function parseStructuredLearningPlan(
   }
 
   if (weeks.size < 2 || items.length < 4) return undefined;
-  return { items, weekCount: weeks.size };
+  return { items, weekCount: weeks.size, title };
 }
 
 export function prepareStructuredPlanExtractionInput(
@@ -169,6 +173,8 @@ function matchingTask(
 function normalizedPlanTask(
   item: StructuredPlanItem,
   existing: ExtractedTask | undefined,
+  sequenceGroupId: string,
+  anchorDate: string,
 ): ExtractedTask {
   const fallback = fallbackEffort(item.action);
   const estimatedMinutes = existing?.estimatedMinutes ?? fallback.minutes;
@@ -195,6 +201,14 @@ function normalizedPlanTask(
       estimatedMinutes,
       existing?.minimumSessionMinutes ?? Math.min(30, estimatedMinutes),
     ),
+    sequence: {
+      groupId: sequenceGroupId,
+      order: item.week * 1_000 + item.day,
+      week: item.week,
+      day: item.day,
+      anchorDate,
+      minimumGapDays: 1,
+    },
     confidence: Math.max(existing?.confidence ?? 0, 0.9),
     fieldConfidence: {
       title: 0.99,
@@ -210,6 +224,15 @@ function normalizedPlanTask(
   };
 }
 
+function stablePlanId(value: string): string {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 export function recoverStructuredLearningPlan(
   input: ExtractionInput,
   result: ExtractionResult,
@@ -218,8 +241,16 @@ export function recoverStructuredLearningPlan(
   if (!plan) return result;
 
   const used = new Set<number>();
+  const sequenceGroupId = `structured-plan-${stablePlanId(
+    comparable(input.text),
+  )}`;
   const tasks = plan.items.map((item) =>
-    normalizedPlanTask(item, matchingTask(result.tasks, item, used)),
+    normalizedPlanTask(
+      item,
+      matchingTask(result.tasks, item, used),
+      sequenceGroupId,
+      input.currentLocalDate,
+    ),
   );
   const checklistSources = new Set(
     plan.items.map((item) => comparable(item.sourceText)),

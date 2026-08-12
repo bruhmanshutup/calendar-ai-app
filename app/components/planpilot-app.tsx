@@ -110,6 +110,7 @@ const REASON_LABELS: Record<ScheduleReasonCode, string> = {
   FINAL_VALID_OPENING: "Final opening",
   STABILITY_PRESERVED: "Kept stable",
   MOVED_AFTER_MISSED: "Missed recovery",
+  SEQUENCE_ORDER: "Plan order",
   FIXED_TIME: "Fixed time",
 };
 
