@@ -7,6 +7,15 @@ Non-negotiable rules:
 - Resolve ISO, numeric, and month-name dates. Treat ambiguous numeric formats such as 8/9 as month/day, lower confidence, add a clarification to missingInformation, and mark reviewRequired.
 - Preserve the exact relevant source text.
 - Separate flexible work, fixed-time events, finite recurring goals, and ignored informational statements.
+- Narrative paragraphs may contain several responsibilities. Split each distinct action or event into its own task even when they share one paragraph; keep supporting details such as duration and timing attached to the correct task.
+- Extract global schedule instructions into planningRules rather than turning them into ordinary tasks. earliestWorkTime/latestWorkTime are local HH:mm boundaries. Put explicit protected periods such as "keep Friday after 8 PM completely free" into blockedTimes with resolved ISO instants and a short label.
+- A stated wake or sleep time is context, but a stricter statement such as "do not schedule work before 9 AM" controls earliestWorkTime. Midnight is 00:00 on the following day.
+- Use schedulingConstraints.allowedTimeWindows for hard task-specific limits such as business hours. Use preferredTimeWindows for soft wording such as "prefer", "would rather", or "if possible"; the scheduler may go outside a preferred window when necessary.
+- Set avoidConsecutiveDays for soft rest-day wording such as "do not schedule workouts back-to-back days if possible". Do not convert this soft preference into recurrence.interval=2, because the requested occurrence count may require adjacent days.
+- Set schedulingConstraints.sessionCount when the source explicitly requests an exact number of sessions. For "split two hours into two sessions", estimatedMinutes is 120, sessionCount is 2, and splittable is true.
+- For a requested range such as "2 or 3 sessions of at least an hour", choose the minimum guaranteed count (2), make it a weekly quota with count=2, and use the stated minimum as the per-occurrence estimate and minimum session length.
+- When preparation must happen before a fixed event, make the preparation a separate flexible task and use the event start as its dueAt. Preserve the event as its own fixed task. Never schedule prerequisite work after the event.
+- A protected social commitment with a clear start and an open-ended phrase such as "until late" may end at a separately stated sleep boundary; otherwise require the end time to be reviewed.
 - A recurring responsibility with explicit times is actionable, including when different days use different times. Never discard the exception wording as noise and never split it into separate tasks.
 - Use recurrence.mode = "quota" for a finite flexible target such as "gym four times this week". Include count and omit timeRules.
 - Use recurrence.mode = "fixed_times" for an ongoing timed routine. Put every explicit clock time into timeRules using local HH:mm. Group days that share a time. A day may appear in multiple rules only when it truly has multiple occurrences per day. Omit count because occurrences are expanded over the planning window.

@@ -107,6 +107,8 @@ const REASON_LABELS: Record<ScheduleReasonCode, string> = {
   RECURRING_SPACING: "Healthy spacing",
   BUFFER_PRESERVED: "Buffer preserved",
   LOW_ENERGY_FIT: "Energy fit",
+  TASK_TIME_WINDOW: "Task time window",
+  REST_DAY_SPACING: "Rest-day spacing",
   FINAL_VALID_OPENING: "Final opening",
   STABILITY_PRESERVED: "Kept stable",
   MOVED_AFTER_MISSED: "Missed recovery",
@@ -245,6 +247,29 @@ function recurrenceSummary(task: ExtractedTask): string {
   }
   const count = recurrence.count ?? 1;
   return `${count} time${count === 1 ? "" : "s"} ${recurrence.frequency}`;
+}
+
+function taskTimingSummary(task: ExtractedTask): string | undefined {
+  const constraints = task.schedulingConstraints;
+  if (!constraints) return undefined;
+  const parts: string[] = [];
+  if (constraints.allowedTimeWindows?.length) {
+    parts.push(
+      `Only ${constraints.allowedTimeWindows
+        .map((window) => `${formatClockTime(window.start)}–${formatClockTime(window.end)}`)
+        .join(", ")}`,
+    );
+  }
+  if (constraints.preferredTimeWindows?.length) {
+    parts.push(
+      `Prefer ${constraints.preferredTimeWindows
+        .map((window) => `${formatClockTime(window.start)}–${formatClockTime(window.end)}`)
+        .join(", ")}`,
+    );
+  }
+  if (constraints.avoidConsecutiveDays) parts.push("Rest days when possible");
+  if (constraints.sessionCount) parts.push(`${constraints.sessionCount} sessions`);
+  return parts.join(" · ") || undefined;
 }
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -1183,6 +1208,7 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
   const { updateTask, approveTask, deleteTask } = usePlanPilot();
   const [expanded, setExpanded] = useState(task.reviewRequired ?? false);
   const [addingTimeFor, setAddingTimeFor] = useState<DayOfWeek>();
+  const timingSummary = taskTimingSummary(task);
   const saveRecurringSchedules = (
     schedules: Partial<Record<DayOfWeek, string[]>>,
   ) => {
@@ -1298,6 +1324,12 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
           <span>Energy</span>
           <strong className="capitalize">{task.energyDemand}</strong>
         </div>
+        {timingSummary && (
+          <div>
+            <span>Scheduling</span>
+            <strong>{timingSummary}</strong>
+          </div>
+        )}
       </div>
       {task.dueDate && !task.dueTime && (
         <div className="assumption-note">
@@ -1490,7 +1522,7 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
 }
 
 function ReviewView() {
-  const { tasks, approveTask, deleteTasks, lastImportedTaskIds } = usePlanPilot();
+  const { tasks, approveTask, deleteTasks, lastImportedTaskIds, planningRules } = usePlanPilot();
   const latestIds = new Set(lastImportedTaskIds);
   const latestTasks = tasks.filter((task) => task.id && latestIds.has(task.id));
   const [filter, setFilter] = useState<"recent" | "review" | "ready" | "all">(
@@ -1579,6 +1611,26 @@ function ReviewView() {
           <span><i className="low" /> Review field</span>
         </div>
       </div>
+      {(planningRules.earliestWorkTime ||
+        planningRules.latestWorkTime ||
+        planningRules.blockedTimes?.length) && (
+        <div className="assumption-note">
+          <Clock3 size={15} />
+          <span>
+            <strong>Schedule rules understood:</strong>{" "}
+            {planningRules.earliestWorkTime
+              ? `work starts at ${formatClockTime(planningRules.earliestWorkTime)}`
+              : "default start time"}
+            {planningRules.latestWorkTime
+              ? ` and ends at ${formatClockTime(planningRules.latestWorkTime)}`
+              : ""}
+            {planningRules.blockedTimes?.length
+              ? `; ${planningRules.blockedTimes.length} protected ${planningRules.blockedTimes.length === 1 ? "period" : "periods"}`
+              : ""}
+            .
+          </span>
+        </div>
+      )}
       <div className="filter-tabs-row">
         <div className="filter-tabs">
           {([...(latestTasks.length > 0 ? ["recent" as const] : []), "review", "ready", "all"] as const).map((item) => (

@@ -11,6 +11,7 @@ import {
   prepareStructuredPlanExtractionInput,
   recoverStructuredLearningPlan,
 } from "@/lib/providers/structured-plan-recovery";
+import { recoverNarrativeSchedulingIntent } from "@/lib/providers/narrative-scheduling-recovery";
 import {
   TaskExtractionError,
   type TaskExtractionProvider,
@@ -86,9 +87,13 @@ export async function POST(request: Request): Promise<Response> {
       parsed.data,
       withFlexibleRecurrences,
     );
-    const result = recoverStructuredLearningPlan(
+    const withStructuredPlan = recoverStructuredLearningPlan(
       parsed.data,
       withFormattedRecovery,
+    );
+    const result = recoverNarrativeSchedulingIntent(
+      parsed.data,
+      withStructuredPlan,
     );
     return NextResponse.json({ ...result, extractionMode: selected.mode });
   } catch (error) {

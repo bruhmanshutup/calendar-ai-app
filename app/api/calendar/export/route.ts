@@ -22,6 +22,8 @@ const sessionSchema = z.object({
       "RECURRING_SPACING",
       "BUFFER_PRESERVED",
       "LOW_ENERGY_FIT",
+      "TASK_TIME_WINDOW",
+      "REST_DAY_SPACING",
       "FINAL_VALID_OPENING",
       "STABILITY_PRESERVED",
       "MOVED_AFTER_MISSED",

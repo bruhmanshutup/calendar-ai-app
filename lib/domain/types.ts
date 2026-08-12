@@ -21,6 +21,14 @@ export type TaskCategory =
 export type EnergyDemand = "low" | "medium" | "high";
 export type TaskType = "flexible" | "fixed_time" | "recurring_goal";
 
+export type ClockWindow = { start: string; end: string };
+
+export type PlanningRules = {
+  earliestWorkTime?: string;
+  latestWorkTime?: string;
+  blockedTimes?: Array<TimeInterval & { label: string }>;
+};
+
 export type ExtractedTask = {
   id?: string;
   title: string;
@@ -39,6 +47,12 @@ export type ExtractedTask = {
   energyDemand: EnergyDemand;
   splittable: boolean;
   minimumSessionMinutes?: number;
+  schedulingConstraints?: {
+    allowedTimeWindows?: ClockWindow[];
+    preferredTimeWindows?: ClockWindow[];
+    avoidConsecutiveDays?: boolean;
+    sessionCount?: number;
+  };
   sequence?: {
     groupId: string;
     order: number;
@@ -113,6 +127,7 @@ export type IgnoredStatement = {
 export type ExtractionResult = {
   tasks: ExtractedTask[];
   ignoredStatements: IgnoredStatement[];
+  planningRules?: PlanningRules;
 };
 
 export type ExtractionInput = {
@@ -169,6 +184,8 @@ export type ScheduleReasonCode =
   | "RECURRING_SPACING"
   | "BUFFER_PRESERVED"
   | "LOW_ENERGY_FIT"
+  | "TASK_TIME_WINDOW"
+  | "REST_DAY_SPACING"
   | "FINAL_VALID_OPENING"
   | "STABILITY_PRESERVED"
   | "MOVED_AFTER_MISSED"

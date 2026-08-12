@@ -40,6 +40,7 @@ type Candidate = {
   start: number;
   end: number;
   localDate: string;
+  adjacentTaskDay?: boolean;
   score: number;
   reasons: ScheduleReasonCode[];
 };
@@ -261,6 +262,24 @@ function isInClockWindow(
   return start <= end
     ? value >= start && value < end
     : value >= start || value < end;
+}
+
+function sessionFitsClockWindow(
+  startMinutes: number,
+  durationMinutes: number,
+  window: { start: string; end: string },
+): boolean {
+  const windowStart = clockMinutes(window.start);
+  const rawEnd = clockMinutes(window.end);
+  const windowEnd = rawEnd <= windowStart ? rawEnd + 24 * 60 : rawEnd;
+  const candidateStart =
+    startMinutes < windowStart && windowEnd > 24 * 60
+      ? startMinutes + 24 * 60
+      : startMinutes;
+  return (
+    candidateStart >= windowStart &&
+    candidateStart + durationMinutes <= windowEnd
+  );
 }
 
 function isWithinWakingHours(
@@ -638,6 +657,8 @@ function candidateScore(
   input: SchedulingInput,
   local: LocalParts,
   dayLoad: CandidateDayLoad | undefined,
+  durationMinutes: number,
+  adjacentTaskDay: boolean,
 ): number {
   const mode = PLANNING_MODE_CONFIG[input.preferences.planningMode];
   const focusMatch = input.preferences.preferredFocusWindows.some((window) =>
@@ -662,7 +683,8 @@ function candidateScore(
   }
 
   const targetFraction =
-    task.taskType === "recurring_goal" && (task.recurrence?.interval ?? 1) > 1
+    task.schedulingConstraints?.avoidConsecutiveDays ||
+    (task.taskType === "recurring_goal" && (task.recurrence?.interval ?? 1) > 1)
       ? 0
       : task.dueAt || task.dueDate
     ? task.priority === "urgent"
@@ -703,6 +725,13 @@ function candidateScore(
   }
   if (task.category === "errand" && focusMatch) score -= 30;
   if (task.energyDemand === "low" && !focusMatch) score += 12;
+  const preferredTaskWindow = task.schedulingConstraints?.preferredTimeWindows?.some(
+    (window) => sessionFitsClockWindow(local.minutes, durationMinutes, window),
+  );
+  if (preferredTaskWindow) score += 52;
+  if (task.schedulingConstraints?.avoidConsecutiveDays && adjacentTaskDay) {
+    score -= 700;
+  }
   if (task.taskType === "recurring_goal") {
     score -= sameTaskDayOccurrences * 70;
   }
@@ -725,6 +754,7 @@ function findCandidate(
   const mode = PLANNING_MODE_CONFIG[input.preferences.planningMode];
   const taskSessions = sessions.filter((session) => session.taskId === task.id);
   const dayLoads = new Map<string, CandidateDayLoad>();
+  const taskSessionDates = new Set<string>();
   for (const session of sessions) {
     const date = localParts(
       new Date(session.start).getTime(),
@@ -738,6 +768,7 @@ function findCandidate(
     load.sessionCount += 1;
     load.minutes += session.minutes;
     if (session.taskId === task.id) load.taskOccurrences += 1;
+    if (session.taskId === task.id) taskSessionDates.add(date);
     dayLoads.set(date, load);
   }
   let bestCandidate: Candidate | undefined;
@@ -791,6 +822,14 @@ function findCandidate(
         continue;
       }
       if (
+        task.schedulingConstraints?.allowedTimeWindows?.length &&
+        !task.schedulingConstraints.allowedTimeWindows.some((window) =>
+          sessionFitsClockWindow(local.minutes, minutes, window),
+        )
+      ) {
+        continue;
+      }
+      if (
         !input.preferences.weekendsAllowed &&
         (local.weekday === "saturday" || local.weekday === "sunday")
       ) {
@@ -837,10 +876,34 @@ function findCandidate(
       if (task.taskType === "recurring_goal" && taskSessions.length > 0) {
         reasons.push("RECURRING_SPACING");
       }
+      const adjacentTaskDay = [...taskSessionDates].some(
+        (date) =>
+          Math.abs(
+            differenceInCalendarDays(parseISO(local.date), parseISO(date)),
+          ) === 1,
+      );
+      if (
+        task.schedulingConstraints?.allowedTimeWindows?.some((window) =>
+          sessionFitsClockWindow(local.minutes, minutes, window),
+        ) ||
+        task.schedulingConstraints?.preferredTimeWindows?.some((window) =>
+          sessionFitsClockWindow(local.minutes, minutes, window),
+        )
+      ) {
+        reasons.push("TASK_TIME_WINDOW");
+      }
+      if (
+        task.schedulingConstraints?.avoidConsecutiveDays &&
+        taskSessions.length > 0 &&
+        !adjacentTaskDay
+      ) {
+        reasons.push("REST_DAY_SPACING");
+      }
       const candidate: Candidate = {
         start,
         end,
         localDate: local.date,
+        adjacentTaskDay,
         score: candidateScore(
           task,
           start,
@@ -848,17 +911,23 @@ function findCandidate(
           input,
           local,
           dayLoads.get(local.date),
+          minutes,
+          adjacentTaskDay,
         ),
         reasons: [...new Set(reasons)],
       };
       const candidateIsBetter =
         !bestCandidate ||
-        (earliestStart !== undefined
-          ? candidate.localDate.localeCompare(bestCandidate.localDate) ||
-            bestCandidate.score - candidate.score ||
-            candidate.start - bestCandidate.start
-          : bestCandidate.score - candidate.score ||
-            candidate.start - bestCandidate.start) < 0;
+        ((task.schedulingConstraints?.avoidConsecutiveDays
+          ? Number(candidate.adjacentTaskDay) -
+            Number(bestCandidate.adjacentTaskDay)
+          : 0) ||
+          (earliestStart !== undefined
+            ? candidate.localDate.localeCompare(bestCandidate.localDate) ||
+              bestCandidate.score - candidate.score ||
+              candidate.start - bestCandidate.start
+            : bestCandidate.score - candidate.score ||
+              candidate.start - bestCandidate.start)) < 0;
       if (candidateIsBetter) bestCandidate = candidate;
       if (earliestStart !== undefined) firstSequenceCandidateDate ??= local.date;
     }
@@ -896,6 +965,31 @@ function chunkDurations(
   }
   if (remaining > 0) chunks.push(remaining);
   return chunks;
+}
+
+function exactSessionDurations(
+  total: number,
+  count: number,
+  minimum: number,
+  maximum: number,
+): number[] | undefined {
+  if (count < 2 || total < count * minimum || total > count * maximum) {
+    return undefined;
+  }
+  const base = Math.floor(total / count / SCHEDULER_INCREMENT_MINUTES) *
+    SCHEDULER_INCREMENT_MINUTES;
+  const durations = Array.from({ length: count }, () => base);
+  let remaining = total - base * count;
+  for (let index = count - 1; remaining > 0; index = (index - 1 + count) % count) {
+    const addition = Math.min(SCHEDULER_INCREMENT_MINUTES, remaining);
+    durations[index] += addition;
+    remaining -= addition;
+  }
+  return durations.every(
+    (duration) => duration >= minimum && duration <= maximum,
+  )
+    ? durations
+    : undefined;
 }
 
 function unschedulable(
@@ -1199,12 +1293,17 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
               Math.min(estimate, remainingMinutes - index * estimate),
           )
         : task.splittable
-          ? chunkDurations(
+          ? (exactSessionDurations(
+              remainingMinutes,
+              task.schedulingConstraints?.sessionCount ?? 0,
+              minimum,
+              input.preferences.maximumBlockMinutes,
+            ) ?? chunkDurations(
               remainingMinutes,
               input.preferences.preferredBlockMinutes,
               input.preferences.maximumBlockMinutes,
               minimum,
-            )
+            ))
           : [remainingMinutes];
     if (
       !task.splittable &&

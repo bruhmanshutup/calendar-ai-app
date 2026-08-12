@@ -105,6 +105,16 @@ describe("date interpretation", () => {
     ).toBe("2026-03-09T06:00:00.000Z");
   });
 
+  it("treats a midnight sleep boundary as the end of the due day", () => {
+    expect(
+      dateOnlyPlanningDeadline(
+        "2026-08-14",
+        "00:00",
+        "America/Los_Angeles",
+      ),
+    ).toBe("2026-08-15T07:00:00.000Z");
+  });
+
   it("returns a typed ambiguous result for missing and unclear dates", () => {
     expect(resolveRelativeDate("", "2026-07-30", "UTC").ambiguous).toBe(true);
     const ambiguous = resolveRelativeDate(

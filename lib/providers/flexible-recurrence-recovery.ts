@@ -204,6 +204,7 @@ export async function recoverFlexibleRecurrences(
 
   return validateAndDedupeExtraction({
     tasks: [...tasks, ...recovered],
+    planningRules: result.planningRules,
     ignoredStatements: result.ignoredStatements.filter(
       (statement) => !matchedSources.has(normalizedSource(statement.sourceText)),
     ),

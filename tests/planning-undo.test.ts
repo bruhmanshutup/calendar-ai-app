@@ -14,6 +14,7 @@ function snapshot(label: string): PlanningUndoSnapshot {
     tasks,
     proposal: generateSchedule(scheduling(tasks)),
     planningMode: "balanced",
+    planningRules: {},
     selectedSessionIds: [],
     sessionReviews: [],
     lastImportedTaskIds: [],

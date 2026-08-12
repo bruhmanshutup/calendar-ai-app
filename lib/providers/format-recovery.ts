@@ -102,6 +102,7 @@ export async function recoverConcreteFormattedTasks(
   );
   return validateAndDedupeExtraction({
     tasks: [...result.tasks, ...recovered],
+    planningRules: result.planningRules,
     ignoredStatements: result.ignoredStatements.filter(
       (statement) => !recoveredSources.has(comparable(statement.sourceText)),
     ),

@@ -258,6 +258,7 @@ export function recoverStructuredLearningPlan(
 
   return validateAndDedupeExtraction({
     tasks,
+    planningRules: result.planningRules,
     ignoredStatements: result.ignoredStatements.filter(
       (statement) => !checklistSources.has(comparable(statement.sourceText)),
     ),

@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { extractedTaskSchema } from "./extraction-schema";
+import { extractedTaskSchema, planningRulesSchema } from "./extraction-schema";
 import type {
   HistoryItem,
   PlanningMode,
+  PlanningRules,
   ReplanProposal,
   ScheduleProposal,
   SessionReview,
@@ -102,6 +103,7 @@ export const persistedWorkspaceSchema = z.object({
   history: z.array(historyItemSchema).max(2_000),
   sessionReviews: z.array(sessionReviewSchema).max(2_000),
   planningMode: z.enum(["conservative", "balanced", "aggressive"]),
+  planningRules: planningRulesSchema.optional(),
   extractionMode: z.enum(["gemini", "openai", "local"]).optional(),
   replan: z.unknown().optional(),
 });
@@ -115,6 +117,7 @@ export type PersistedWorkspace = {
   history: HistoryItem[];
   sessionReviews: SessionReview[];
   planningMode: PlanningMode;
+  planningRules?: PlanningRules;
   extractionMode?: "gemini" | "openai" | "local";
   replan?: ReplanProposal;
 };

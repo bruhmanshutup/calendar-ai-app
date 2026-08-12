@@ -85,6 +85,10 @@ describe("Gemini extraction provider", () => {
     expect(body.contents[0].parts[0].text).toContain(
       "use the newest unquoted message as the primary source",
     );
+    expect(body.contents[0].parts[0].text).toContain(
+      "schedulingConstraints.allowedTimeWindows",
+    );
+    expect(body.contents[0].parts[0].text).toContain("planningRules");
   });
 
   it.runIf(process.env.GEMINI_LIVE_TEST === "1")(

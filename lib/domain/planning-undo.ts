@@ -1,5 +1,6 @@
 import type {
   ExtractedTask,
+  PlanningRules,
   PlanningMode,
   ReplanProposal,
   ScheduleProposal,
@@ -11,6 +12,7 @@ export type PlanningUndoSnapshot = {
   tasks: ExtractedTask[];
   proposal: ScheduleProposal;
   planningMode: PlanningMode;
+  planningRules: PlanningRules;
   replan?: ReplanProposal;
   selectedSessionIds: string[];
   sessionReviews: SessionReview[];
@@ -27,6 +29,7 @@ function representsSameState(
     left.tasks === right.tasks &&
     left.proposal === right.proposal &&
     left.planningMode === right.planningMode &&
+    left.planningRules === right.planningRules &&
     left.replan === right.replan &&
     left.selectedSessionIds === right.selectedSessionIds &&
     left.sessionReviews === right.sessionReviews &&

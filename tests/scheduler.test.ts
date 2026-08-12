@@ -1126,4 +1126,67 @@ describe("deterministic scheduling", () => {
       "SEQUENCE_BLOCKED",
     ]);
   });
+
+  it("enforces hard task hours and favors soft task time windows", () => {
+    const hard = generateSchedule(
+      scheduling([
+        task({
+          id: "office-call",
+          title: "Call an office",
+          estimatedMinutes: 30,
+          schedulingConstraints: {
+            allowedTimeWindows: [{ start: "09:00", end: "10:00" }],
+          },
+        }),
+      ]),
+    ).sessions[0];
+    const preferred = generateSchedule(
+      scheduling([
+        task({
+          id: "afternoon-errand",
+          title: "Afternoon errand",
+          estimatedMinutes: 30,
+          schedulingConstraints: {
+            preferredTimeWindows: [{ start: "16:00", end: "18:00" }],
+          },
+        }),
+      ]),
+    ).sessions[0];
+
+    expect(hard.start.slice(11, 16) >= "09:00").toBe(true);
+    expect(hard.end.slice(11, 16) <= "10:00").toBe(true);
+    expect(hard.reasonCodes).toContain("TASK_TIME_WINDOW");
+    expect(preferred.start.slice(11, 16) >= "16:00").toBe(true);
+    expect(preferred.end.slice(11, 16) <= "18:00").toBe(true);
+    expect(preferred.reasonCodes).toContain("TASK_TIME_WINDOW");
+  });
+
+  it("avoids consecutive recurrence days when possible but treats it as soft", () => {
+    const workout = task({
+      id: "soft-rest-days",
+      title: "Workout",
+      taskType: "recurring_goal",
+      estimatedMinutes: 45,
+      recurrence: { frequency: "weekly", mode: "quota", count: 3 },
+      schedulingConstraints: { avoidConsecutiveDays: true },
+    });
+    const spaced = generateSchedule(scheduling([workout]));
+    expect(
+      spaced.sessions.map((session) => session.start.slice(0, 10)),
+    ).toEqual(["2026-07-27", "2026-07-29", "2026-07-31"]);
+
+    const adjacent = generateSchedule(
+      scheduling(
+        [{ ...workout, recurrence: { ...workout.recurrence!, count: 2 } }],
+        {
+          availability: [
+            { start: "2026-07-27T08:00:00.000Z", end: "2026-07-27T18:00:00.000Z" },
+            { start: "2026-07-28T08:00:00.000Z", end: "2026-07-28T18:00:00.000Z" },
+          ],
+        },
+      ),
+    );
+    expect(adjacent.sessions).toHaveLength(2);
+    expect(adjacent.unschedulable).toHaveLength(0);
+  });
 });

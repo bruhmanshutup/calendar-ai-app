@@ -105,6 +105,7 @@ export async function recoverTimedRecurrences(
 
   return validateAndDedupeExtraction({
     tasks: [...mergedTasks, ...recoveredTasks],
+    planningRules: result.planningRules,
     ignoredStatements: result.ignoredStatements.filter(
       (statement) =>
         !recoveredSources.has(normalizedSource(statement.sourceText)),

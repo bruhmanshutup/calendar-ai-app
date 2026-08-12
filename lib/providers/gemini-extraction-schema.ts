@@ -72,6 +72,43 @@ export const GEMINI_EXTRACTION_SCHEMA = {
             maximum: 240,
             description: "Shortest useful session; never more than estimatedMinutes.",
           },
+          schedulingConstraints: {
+            type: "object",
+            properties: {
+              allowedTimeWindows: {
+                type: "array",
+                minItems: 1,
+                maxItems: 14,
+                description:
+                  "Hard local clock windows when the task can occur, such as business hours.",
+                items: {
+                  type: "object",
+                  properties: {
+                    start: { type: "string", pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$" },
+                    end: { type: "string", pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$" },
+                  },
+                  required: ["start", "end"],
+                },
+              },
+              preferredTimeWindows: {
+                type: "array",
+                minItems: 1,
+                maxItems: 14,
+                description:
+                  "Soft local clock preferences; scheduling outside them remains valid.",
+                items: {
+                  type: "object",
+                  properties: {
+                    start: { type: "string", pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$" },
+                    end: { type: "string", pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$" },
+                  },
+                  required: ["start", "end"],
+                },
+              },
+              avoidConsecutiveDays: { type: "boolean" },
+              sessionCount: { type: "integer", minimum: 2, maximum: 31 },
+            },
+          },
           recurrence: {
             type: "object",
             properties: {
@@ -270,6 +307,34 @@ export const GEMINI_EXTRACTION_SCHEMA = {
           reason: { type: "string" },
         },
         required: ["sourceText", "reason"],
+      },
+    },
+    planningRules: {
+      type: "object",
+      description:
+        "Global work-hour preferences and explicit protected intervals from the source.",
+      properties: {
+        earliestWorkTime: {
+          type: "string",
+          pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+        },
+        latestWorkTime: {
+          type: "string",
+          pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+        },
+        blockedTimes: {
+          type: "array",
+          maxItems: 100,
+          items: {
+            type: "object",
+            properties: {
+              start: { type: "string", format: "date-time" },
+              end: { type: "string", format: "date-time" },
+              label: { type: "string" },
+            },
+            required: ["start", "end", "label"],
+          },
+        },
       },
     },
   },

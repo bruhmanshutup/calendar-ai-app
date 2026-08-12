@@ -12,6 +12,30 @@ const dayOfWeekSchema = z.enum([
 
 const confidenceSchema = z.number().min(0).max(1);
 const clockTimeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
+const clockWindowSchema = z
+  .object({ start: clockTimeSchema, end: clockTimeSchema })
+  .refine((window) => window.start !== window.end, {
+    message: "A time window must have different start and end times.",
+  });
+
+export const planningRulesSchema = z.object({
+  earliestWorkTime: clockTimeSchema.optional(),
+  latestWorkTime: clockTimeSchema.optional(),
+  blockedTimes: z
+    .array(
+      z
+        .object({
+          start: z.string().datetime({ offset: true }),
+          end: z.string().datetime({ offset: true }),
+          label: z.string().trim().min(1).max(180),
+        })
+        .refine((interval) => new Date(interval.end) > new Date(interval.start), {
+          message: "A blocked interval must end after it starts.",
+        }),
+    )
+    .max(100)
+    .optional(),
+});
 
 export const extractedTaskSchema = z
   .object({
@@ -40,6 +64,14 @@ export const extractedTaskSchema = z
     energyDemand: z.enum(["low", "medium", "high"]),
     splittable: z.boolean(),
     minimumSessionMinutes: z.number().int().positive().max(240).optional(),
+    schedulingConstraints: z
+      .object({
+        allowedTimeWindows: z.array(clockWindowSchema).min(1).max(14).optional(),
+        preferredTimeWindows: z.array(clockWindowSchema).min(1).max(14).optional(),
+        avoidConsecutiveDays: z.boolean().optional(),
+        sessionCount: z.number().int().min(2).max(31).optional(),
+      })
+      .optional(),
     sequence: z
       .object({
         groupId: z.string().trim().min(1).max(120),
@@ -265,6 +297,7 @@ export const extractionResultSchema = z.object({
       }),
     )
     .max(100),
+  planningRules: planningRulesSchema.optional(),
 });
 
 export type ValidatedExtractionResult = z.infer<

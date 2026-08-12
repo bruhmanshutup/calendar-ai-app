@@ -310,7 +310,10 @@ export function dateOnlyPlanningDeadline(
   timeZone: string,
 ): string {
   const safeTime = parseClockTime(sleepingTime) ?? "23:59";
-  return fromZonedTime(`${date}T${safeTime}:00`, timeZone).toISOString();
+  const deadlineDate = safeTime < "06:00"
+    ? format(addDays(parse(date, "yyyy-MM-dd", new Date()), 1), "yyyy-MM-dd")
+    : date;
+  return fromZonedTime(`${deadlineDate}T${safeTime}:00`, timeZone).toISOString();
 }
 
 export function localDateForInstant(instant: string, timeZone: string): string {

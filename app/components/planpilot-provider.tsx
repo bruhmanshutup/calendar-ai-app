@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { addDays, format, parseISO } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { DEFAULT_PREFERENCES } from "@/lib/defaults";
 import { generateSchedule } from "@/lib/domain/scheduler";
@@ -33,6 +34,7 @@ import type {
   HistoryItem,
   PlannedSession,
   PlanningMode,
+  PlanningRules,
   ReplanProposal,
   ScheduleProposal,
   ScheduledBreak,
@@ -80,6 +82,7 @@ type PlanPilotContextValue = {
   delaySessionReview: (sessionId: string) => void;
   history: HistoryItem[];
   planningMode: PlanningMode;
+  planningRules: PlanningRules;
   setPlanningMode: (mode: PlanningMode) => void;
   canUndoSchedule: boolean;
   undoScheduleLabel?: string;
@@ -95,7 +98,7 @@ type PlanPilotContextValue = {
 const Context = createContext<PlanPilotContextValue | null>(null);
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
-const CURRENT_SCHEDULER_VERSION = 8;
+const CURRENT_SCHEDULER_VERSION = 9;
 
 function currentLocalDate(timeZone: string, instant = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -110,11 +113,47 @@ function currentLocalDate(timeZone: string, instant = new Date()): string {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+function localClockMinutes(instant: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(instant));
+  const value = (type: "hour" | "minute") =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return value("hour") * 60 + value("minute");
+}
+
+function sessionFitsTaskHours(
+  task: ExtractedTask | undefined,
+  start: number,
+  end: number,
+): boolean {
+  const windows = task?.schedulingConstraints?.allowedTimeWindows;
+  if (!windows?.length) return true;
+  const startMinute = localClockMinutes(start, DEFAULT_PREFERENCES.timeZone);
+  const duration = Math.round((end - start) / MINUTE);
+  return windows.some((window) => {
+    const [startHour, startMinutes] = window.start.split(":").map(Number);
+    const [endHour, endMinutes] = window.end.split(":").map(Number);
+    const windowStart = startHour * 60 + startMinutes;
+    const rawEnd = endHour * 60 + endMinutes;
+    const windowEnd = rawEnd <= windowStart ? rawEnd + 24 * 60 : rawEnd;
+    const candidateStart =
+      startMinute < windowStart && windowEnd > 24 * 60
+        ? startMinute + 24 * 60
+        : startMinute;
+    return candidateStart >= windowStart && candidateStart + duration <= windowEnd;
+  });
+}
+
 function schedulingBase(
   planningMode: PlanningMode,
   tasks: ExtractedTask[] = [],
   lockedSessions: ExistingSession[] = [],
   protectedBreaks: ScheduledBreak[] = [],
+  planningRules: PlanningRules = {},
 ): Omit<SchedulingInput, "tasks"> {
   const now = new Date(Math.ceil(Date.now() / (15 * MINUTE)) * 15 * MINUTE);
   const planningLocalDate = currentLocalDate(DEFAULT_PREFERENCES.timeZone, now);
@@ -154,12 +193,20 @@ function schedulingBase(
       DEFAULT_PREFERENCES.timeZone,
       new Date(now.getTime() + index * DAY),
     );
+    const wakingTime =
+      planningRules.earliestWorkTime ?? DEFAULT_PREFERENCES.wakingTime;
+    const sleepingTime =
+      planningRules.latestWorkTime ?? DEFAULT_PREFERENCES.sleepingTime;
+    const sleepingDate =
+      sleepingTime <= wakingTime
+        ? format(addDays(parseISO(date), 1), "yyyy-MM-dd")
+        : date;
     const waking = fromZonedTime(
-      `${date}T${DEFAULT_PREFERENCES.wakingTime}:00`,
+      `${date}T${wakingTime}:00`,
       DEFAULT_PREFERENCES.timeZone,
     );
     const sleeping = fromZonedTime(
-      `${date}T${DEFAULT_PREFERENCES.sleepingTime}:00`,
+      `${sleepingDate}T${sleepingTime}:00`,
       DEFAULT_PREFERENCES.timeZone,
     );
     const start = new Date(Math.max(now.getTime(), waking.getTime()));
@@ -176,9 +223,22 @@ function schedulingBase(
     allowExplicitTimesOutsideAvailability: true,
     availability,
     unavailableEvents: [],
-    blockedTimes: protectedBreaks.map(({ start, end }) => ({ start, end })),
+    blockedTimes: [
+      ...protectedBreaks.map(({ start, end }) => ({ start, end })),
+      ...(planningRules.blockedTimes ?? []).map(({ start, end }) => ({
+        start,
+        end,
+      })),
+    ],
     lockedSessions,
-    preferences: { ...DEFAULT_PREFERENCES, planningMode },
+    preferences: {
+      ...DEFAULT_PREFERENCES,
+      wakingTime:
+        planningRules.earliestWorkTime ?? DEFAULT_PREFERENCES.wakingTime,
+      sleepingTime:
+        planningRules.latestWorkTime ?? DEFAULT_PREFERENCES.sleepingTime,
+      planningMode,
+    },
   };
 }
 
@@ -187,6 +247,7 @@ function scheduleFor(
   planningMode: PlanningMode,
   preservedSessions: PlannedSession[] = [],
   preservedBreaks: ScheduledBreak[] = [],
+  planningRules: PlanningRules = {},
 ): ScheduleProposal {
   const proposal = generateSchedule({
     ...schedulingBase(
@@ -194,6 +255,7 @@ function scheduleFor(
       tasks,
       preservedSessions.map(asExisting),
       preservedBreaks,
+      planningRules,
     ),
     tasks: tasks.filter((task) => !task.completed && !task.cancelled),
   });
@@ -207,6 +269,25 @@ function scheduleFor(
     (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
   );
   return proposal;
+}
+
+function mergePlanningRules(
+  current: PlanningRules,
+  incoming: PlanningRules | undefined,
+): PlanningRules {
+  if (!incoming) return current;
+  const blocked = [...(current.blockedTimes ?? []), ...(incoming.blockedTimes ?? [])];
+  const seen = new Set<string>();
+  return {
+    earliestWorkTime: incoming.earliestWorkTime ?? current.earliestWorkTime,
+    latestWorkTime: incoming.latestWorkTime ?? current.latestWorkTime,
+    blockedTimes: blocked.filter((item) => {
+      const key = `${item.start}|${item.end}|${item.label}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(-100),
+  };
 }
 
 function asExisting(session: PlannedSession): ExistingSession {
@@ -242,6 +323,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
   const [lastImportedTaskIds, setLastImportedTaskIds] = useState<string[]>([]);
   const [planningMode, setPlanningModeState] =
     useState<PlanningMode>("balanced");
+  const [planningRules, setPlanningRules] = useState<PlanningRules>({});
   const [proposal, setProposal] = useState<ScheduleProposal>(() =>
     scheduleFor([], "balanced"),
   );
@@ -289,6 +371,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         if (active && body.state) {
           const saved = parsePersistedWorkspace(body.state);
           setTasks(saved.tasks);
+          setPlanningRules(saved.planningRules ?? {});
           const preservedSessions = saved.proposal.sessions.filter(
             (session) => session.status !== "proposed",
           );
@@ -306,6 +389,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
                   saved.planningMode,
                   preservedSessions,
                   preservedBreaks,
+                  saved.planningRules,
                 ),
           );
           setImportText(saved.importText);
@@ -344,6 +428,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
             history,
             sessionReviews,
             planningMode,
+            planningRules,
             extractionMode,
             replan,
           },
@@ -363,6 +448,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     history,
     sessionReviews,
     planningMode,
+    planningRules,
     extractionMode,
     replan,
   ]);
@@ -379,6 +465,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         tasks,
         proposal,
         planningMode,
+        planningRules,
         replan,
         selectedSessionIds,
         sessionReviews,
@@ -388,6 +475,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     },
     [
       planningMode,
+      planningRules,
       proposal,
       replan,
       selectedSessionIds,
@@ -406,6 +494,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     setTasks(snapshot.tasks);
     setProposal(snapshot.proposal);
     setPlanningModeState(snapshot.planningMode);
+    setPlanningRules(snapshot.planningRules);
     setReplan(snapshot.replan);
     setSelectedSessionIds(snapshot.selectedSessionIds);
     setSessionReviews(snapshot.sessionReviews);
@@ -426,10 +515,10 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(
     (nextTasks: ExtractedTask[], nextMode = planningMode) => {
-      setProposal(scheduleFor(nextTasks, nextMode));
+      setProposal(scheduleFor(nextTasks, nextMode, [], [], planningRules));
       setReplan(undefined);
     },
-    [planningMode],
+    [planningMode, planningRules],
   );
 
   const analyzeText = useCallback(async () => {
@@ -449,6 +538,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       });
       const body = (await response.json()) as {
         tasks?: ExtractedTask[];
+        planningRules?: PlanningRules;
         extractionMode?: ExtractionMode;
         error?: { message: string };
       };
@@ -456,6 +546,10 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         throw new Error(body.error?.message ?? "Extraction failed.");
       }
       const extractedTasks = body.tasks;
+      const nextPlanningRules = mergePlanningRules(
+        planningRules,
+        body.planningRules,
+      );
       const localEstimateCount = extractedTasks.filter(
         (task) => task.effortEstimateSource === "heuristic",
       ).length;
@@ -482,6 +576,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         rememberScheduleChange("responsibility import");
       }
       setTasks(merged.tasks);
+      setPlanningRules(nextPlanningRules);
       setLastImportedTaskIds(merged.importedTaskIds);
       setExtractionMode(body.extractionMode);
       setProposal(
@@ -490,6 +585,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           planningMode,
           preservedSessions,
           preservedBreaks,
+          nextPlanningRules,
         ),
       );
       setReplan(undefined);
@@ -525,7 +621,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           : "Extraction failed. Your text is still here to retry.",
       );
     }
-  }, [importText, planningMode, proposal, rememberScheduleChange, tasks]);
+  }, [importText, planningMode, planningRules, proposal, rememberScheduleChange, tasks]);
 
   const updateTask = useCallback(
     (
@@ -581,6 +677,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       const nextTasks = tasks.filter(
         (task) => !task.id || !removedIds.has(task.id),
       );
+      const nextPlanningRules = nextTasks.length === 0 ? {} : planningRules;
       const retainedTaskIds = new Set(
         nextTasks
           .map((task) => task.id)
@@ -594,6 +691,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       );
 
       setTasks(nextTasks);
+      setPlanningRules(nextPlanningRules);
       setLastImportedTaskIds((current) =>
         current.filter((id) => !removedIds.has(id)),
       );
@@ -605,6 +703,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           proposal.breaks.filter((item) =>
             preservedSessionIds.has(item.afterSessionId),
           ),
+          nextPlanningRules,
         ),
       );
       setSelectedSessionIds((current) =>
@@ -620,7 +719,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           : `${removedTasks.length} tasks removed. You can undo this from Schedule.`,
       );
     },
-    [planningMode, proposal, rememberScheduleChange, tasks],
+    [planningMode, planningRules, proposal, rememberScheduleChange, tasks],
   );
 
   const deleteTask = useCallback(
@@ -693,7 +792,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         setToast("Locked sessions must be unlocked before they can move.");
         return;
       }
-      const base = schedulingBase(planningMode, tasks);
+      const base = schedulingBase(planningMode, tasks, [], [], planningRules);
       const increment = 15 * MINUTE;
       const duration =
         new Date(target.end).getTime() - new Date(target.start).getTime();
@@ -716,7 +815,18 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
             start < new Date(session.end).getTime() &&
             new Date(session.start).getTime() < end,
         );
-        if (insideAvailability && !overlaps && end <= deadlineAt) {
+        const overlapsProtectedTime = base.blockedTimes.some(
+          (interval) =>
+            start < new Date(interval.end).getTime() &&
+            new Date(interval.start).getTime() < end,
+        );
+        if (
+          insideAvailability &&
+          !overlaps &&
+          !overlapsProtectedTime &&
+          sessionFitsTaskHours(task, start, end) &&
+          end <= deadlineAt
+        ) {
           rememberScheduleChange("session move");
           setProposal({
             ...proposal,
@@ -745,7 +855,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       }
       setToast("No other valid opening fits before the deadline. Nothing moved.");
     },
-    [planningMode, proposal, rememberScheduleChange, tasks],
+    [planningMode, planningRules, proposal, rememberScheduleChange, tasks],
   );
 
   const toggleSelectedSession = useCallback((id: string) => {
@@ -887,7 +997,13 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
             minutesCompleted: completedMinutes,
             sessions: existing,
             task,
-            scheduling: schedulingBase(planningMode, tasks),
+            scheduling: schedulingBase(
+              planningMode,
+              tasks,
+              [],
+              [],
+              planningRules,
+            ),
           }),
         );
       } else {
@@ -921,7 +1037,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           : "Outcome saved.",
       );
     },
-    [planningMode, proposal.sessions, rememberScheduleChange, reviewQueue, tasks],
+    [planningMode, planningRules, proposal.sessions, rememberScheduleChange, reviewQueue, tasks],
   );
 
   const delaySessionReview = useCallback((sessionId: string) => {
@@ -1001,6 +1117,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
   const clearWorkspace = useCallback(() => {
     setTasks([]);
     setLastImportedTaskIds([]);
+    setPlanningRules({});
     setProposal(scheduleFor([], planningMode));
     setImportText("");
     setImportState("idle");
@@ -1013,7 +1130,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     setSessionReviews([]);
     setScheduleUndoStack([]);
     void fetch("/api/workspace", { method: "DELETE" });
-    setToast("Workspace cleared. Planning preferences and theme were kept.");
+    setToast("Workspace cleared. Planning mode and theme were kept.");
   }, [planningMode]);
 
   const value = useMemo<PlanPilotContextValue>(
@@ -1048,6 +1165,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       delaySessionReview,
       history,
       planningMode,
+      planningRules,
       setPlanningMode,
       canUndoSchedule: scheduleUndoStack.length > 0,
       undoScheduleLabel: scheduleUndoStack.at(-1)?.label,
@@ -1089,6 +1207,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       delaySessionReview,
       history,
       planningMode,
+      planningRules,
       setPlanningMode,
       scheduleUndoStack,
       undoSchedule,

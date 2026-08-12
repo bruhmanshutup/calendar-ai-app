@@ -13,6 +13,8 @@ const EXPLANATIONS: Record<ScheduleReasonCode, string> = {
   RECURRING_SPACING: "Spaced from other occurrences when capacity allowed.",
   BUFFER_PRESERVED: "This placement preserves time for interruptions.",
   LOW_ENERGY_FIT: "Placed in a lower-energy opening that suits this task.",
+  TASK_TIME_WINDOW: "Placed inside this task's stated or preferred time window.",
+  REST_DAY_SPACING: "Kept a rest day between similar recurring sessions when possible.",
   FINAL_VALID_OPENING: "This was the final valid opening before the deadline.",
   STABILITY_PRESERVED: "Kept in place to minimize disruption.",
   MOVED_AFTER_MISSED: "Moved because the earlier session was marked missed.",

@@ -68,6 +68,7 @@ export async function recoverExplicitOverdueTasks(
   );
   return validateAndDedupeExtraction({
     tasks: [...result.tasks, ...recovered],
+    planningRules: result.planningRules,
     ignoredStatements: result.ignoredStatements.filter(
       (statement) => !recoveredSources.has(normalizedSource(statement.sourceText)),
     ),
