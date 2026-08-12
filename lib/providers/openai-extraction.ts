@@ -49,6 +49,7 @@ export class OpenAITaskExtractionProvider
               `Current local date: ${input.currentLocalDate}`,
               `IANA time zone: ${input.timeZone}`,
               repairMessage ? `Repair request: ${repairMessage}` : "",
+              input.structureHint ?? "",
               "Source content:",
               input.text,
             ]

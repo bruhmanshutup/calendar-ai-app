@@ -8,9 +8,9 @@ import { recoverTimedRecurrences } from "@/lib/providers/recurrence-recovery";
 import { recoverFlexibleRecurrences } from "@/lib/providers/flexible-recurrence-recovery";
 import { recoverConcreteFormattedTasks } from "@/lib/providers/format-recovery";
 import {
-  prepareStructuredPlanExtractionInput,
   recoverStructuredLearningPlan,
 } from "@/lib/providers/structured-plan-recovery";
+import { prepareTaskExtractionInput } from "@/lib/providers/narrative-structure";
 import { recoverNarrativeSchedulingIntent } from "@/lib/providers/narrative-scheduling-recovery";
 import {
   TaskExtractionError,
@@ -59,7 +59,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   try {
     let selected = provider();
-    const extractionInput = prepareStructuredPlanExtractionInput(parsed.data);
+    const extractionInput = prepareTaskExtractionInput(parsed.data);
     let extracted: Awaited<ReturnType<TaskExtractionProvider["extractTasks"]>>;
     try {
       extracted = await selected.extractor.extractTasks(extractionInput);

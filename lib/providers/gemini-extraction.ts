@@ -49,6 +49,7 @@ export class GeminiTaskExtractionProvider
       `IANA time zone: ${input.timeZone}`,
       repairMessage ? `Repair request: ${repairMessage}` : "",
       `Required JSON schema: ${JSON.stringify(GEMINI_EXTRACTION_SCHEMA)}`,
+      input.structureHint ?? "",
       "Source content:",
       input.text,
     ]

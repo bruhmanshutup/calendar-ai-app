@@ -135,6 +135,8 @@ export type ExtractionInput = {
   currentLocalDate: string;
   timeZone: string;
   sourceId?: string;
+  /** Internal formatting evidence for the AI extractor. Never part of sourceText. */
+  structureHint?: string;
 };
 
 export type TimeInterval = {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GeminiTaskExtractionProvider } from "../lib/providers/gemini-extraction";
+import { prepareTaskExtractionInput } from "../lib/providers/narrative-structure";
 import { task } from "./fixtures";
 
 vi.mock("server-only", () => ({}));
@@ -58,7 +59,14 @@ describe("Gemini extraction provider", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await new GeminiTaskExtractionProvider().extractTasks(input);
+    const narrativeInput = prepareTaskExtractionInput({
+      ...input,
+      text:
+        "I need to draft the Zephyr outline by Friday. It should take about 75 minutes.",
+    });
+    const result = await new GeminiTaskExtractionProvider().extractTasks(
+      narrativeInput,
+    );
 
     expect(result.tasks[0]).toMatchObject({
       estimatedMinutes: 75,
@@ -89,6 +97,17 @@ describe("Gemini extraction provider", () => {
       "schedulingConstraints.allowedTimeWindows",
     );
     expect(body.contents[0].parts[0].text).toContain("planningRules");
+    expect(body.contents[0].parts[0].text).toContain(
+      "P = blank-line paragraph (strong boundary)",
+    );
+    expect(body.contents[0].parts[0].text).toContain(
+      "P1: L1.S1=action; L1.S2=detail",
+    );
+    expect(
+      body.contents[0].parts[0].text.match(
+        /I need to draft the Zephyr outline by Friday\./g,
+      ),
+    ).toHaveLength(1);
   });
 
   it.runIf(process.env.GEMINI_LIVE_TEST === "1")(
