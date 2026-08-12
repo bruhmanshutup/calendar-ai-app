@@ -86,4 +86,37 @@ describe("responsibility imports", () => {
     expect(result.importedTaskIds).toEqual(["existing-appointment"]);
     expect(result.refreshedTaskCount).toBe(1);
   });
+
+  it("replaces prior collapsed learning-plan summaries when checklist items are recovered", () => {
+    const collapsedPlan = task({
+      id: "collapsed-plan",
+      title: "Complete 12-Week Electronics Cooling Learning Plan",
+      sourceText: "12-Week Electronics Cooling Learning Plan",
+      taskType: "recurring_goal",
+    });
+    const collapsedChecklist = task({
+      id: "collapsed-checklist",
+      title: "Daily checklist",
+      sourceText: "Daily checklist:",
+      taskType: "recurring_goal",
+    });
+    const unrelated = task({ id: "exercise", title: "Exercise" });
+    const recovered = task({
+      id: "structured-plan-w001-d001",
+      title: "Week 1, Day 1: Read the course overview",
+      sourceText:
+        "Week 1 — Heat Transfer Fundamentals\n☐ Day 1: Read the course overview.",
+    });
+
+    const result = mergeImportedTasks(
+      [collapsedPlan, collapsedChecklist, unrelated],
+      [recovered],
+    );
+
+    expect(result.tasks.map((item) => item.title)).toEqual([
+      "Exercise",
+      "Week 1, Day 1: Read the course overview",
+    ]);
+    expect(result.removedMetadataCount).toBe(2);
+  });
 });

@@ -34,6 +34,16 @@ function isClearlyImportMetadata(task: ExtractedTask): boolean {
   return monthHeading || (markdownLinksOnly && !actionableTitle);
 }
 
+function isSupersededStructuredPlanSummary(task: ExtractedTask): boolean {
+  const title = normalizedText(task.title).replace(/[*_~`#]+/g, " ");
+  const source = normalizedText(task.sourceText).replace(/[*_~`#]+/g, " ");
+  return (
+    /^(?:daily|weekly)?\s*checklist\s*:?$/.test(title) ||
+    /^complete\s+\d+\s*[-–— ]\s*week\b.*\bplan\b/.test(title) ||
+    /^\d+\s*[-–— ]\s*week\b.*\bplan\b/.test(source)
+  );
+}
+
 function defaultTaskId(): string {
   return `task-${globalThis.crypto.randomUUID()}`;
 }
@@ -56,8 +66,13 @@ export function mergeImportedTasks(
   importedTasks: ExtractedTask[],
   createId: () => string = defaultTaskId,
 ): TaskImportMerge {
+  const importsStructuredPlan = importedTasks.some((task) =>
+    task.id?.startsWith("structured-plan-"),
+  );
   const retainedTasks = existingTasks.filter(
-    (task) => !isClearlyImportMetadata(task),
+    (task) =>
+      !isClearlyImportMetadata(task) &&
+      !(importsStructuredPlan && isSupersededStructuredPlanSummary(task)),
   );
   const existingByFingerprint = new Map(
     retainedTasks.map((task) => [taskFingerprint(task), task]),

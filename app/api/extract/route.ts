@@ -7,6 +7,10 @@ import { recoverExplicitOverdueTasks } from "@/lib/providers/overdue-recovery";
 import { recoverTimedRecurrences } from "@/lib/providers/recurrence-recovery";
 import { recoverFlexibleRecurrences } from "@/lib/providers/flexible-recurrence-recovery";
 import {
+  prepareStructuredPlanExtractionInput,
+  recoverStructuredLearningPlan,
+} from "@/lib/providers/structured-plan-recovery";
+import {
   TaskExtractionError,
   type TaskExtractionProvider,
 } from "@/lib/providers/task-extraction";
@@ -53,16 +57,17 @@ export async function POST(request: Request): Promise<Response> {
   }
   try {
     let selected = provider();
+    const extractionInput = prepareStructuredPlanExtractionInput(parsed.data);
     let extracted: Awaited<ReturnType<TaskExtractionProvider["extractTasks"]>>;
     try {
-      extracted = await selected.extractor.extractTasks(parsed.data);
+      extracted = await selected.extractor.extractTasks(extractionInput);
     } catch (error) {
       if (selected.mode === "local") throw error;
       selected = {
         extractor: new MockTaskExtractionProvider(),
         mode: "local",
       };
-      extracted = await selected.extractor.extractTasks(parsed.data);
+      extracted = await selected.extractor.extractTasks(extractionInput);
     }
     const withOverdueRecovery = await recoverExplicitOverdueTasks(
       parsed.data,
@@ -72,9 +77,13 @@ export async function POST(request: Request): Promise<Response> {
       parsed.data,
       withOverdueRecovery,
     );
-    const result = await recoverFlexibleRecurrences(
+    const withFlexibleRecurrences = await recoverFlexibleRecurrences(
       parsed.data,
       withTimedRecurrences,
+    );
+    const result = recoverStructuredLearningPlan(
+      parsed.data,
+      withFlexibleRecurrences,
     );
     return NextResponse.json({ ...result, extractionMode: selected.mode });
   } catch (error) {

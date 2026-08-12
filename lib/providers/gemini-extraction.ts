@@ -67,6 +67,7 @@ export class GeminiTaskExtractionProvider
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.1,
+            maxOutputTokens: 32_768,
             responseMimeType: "application/json",
           },
         }),
