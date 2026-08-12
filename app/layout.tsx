@@ -34,7 +34,7 @@ export async function generateMetadata(): Promise<Metadata> {
       type: "website",
       images: [
         {
-          url: "/og.png",
+          url: "/og-overdue.png",
           width: 1200,
           height: 630,
           alt: "PlanPilot — Plan with reality.",
@@ -46,7 +46,7 @@ export async function generateMetadata(): Promise<Metadata> {
       title: "PlanPilot — plan with reality",
       description:
         "A realistic planning layer for messy responsibilities.",
-      images: ["/og.png"],
+      images: ["/og-overdue.png"],
     },
   };
 }

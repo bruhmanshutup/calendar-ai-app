@@ -46,6 +46,32 @@ describe("deterministic scheduling", () => {
     expect(session?.start).toBe("2026-07-27T08:00:00.000Z");
     expect(session?.reasonCodes).toContain("OVERDUE_RECOVERY");
     expect(proposal.unschedulable).toHaveLength(0);
+    expect(proposal.planHealth.deadlinesAtRisk).toBe(1);
+    expect(proposal.planHealth.summary).toContain("1 overdue deadline is still at risk");
+  });
+
+  it("does not double-count overdue work that also has unplaced time", () => {
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "overdue-unplaced",
+            title: "Overdue work with time left",
+            dueDate: "2026-07-26",
+            estimatedMinutes: 90,
+            priority: "urgent",
+          }),
+        ],
+        {
+          availability: [
+            { start: "2026-07-27T08:00:00.000Z", end: "2026-07-27T08:45:00.000Z" },
+          ],
+        },
+      ),
+    );
+
+    expect(proposal.unschedulable).toHaveLength(1);
+    expect(proposal.planHealth.deadlinesAtRisk).toBe(1);
   });
 
   it("schedules overdue work before future work when capacity is tight", () => {

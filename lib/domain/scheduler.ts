@@ -1107,11 +1107,23 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
   const recurringBehind = recurringGoals.filter((task) =>
     unschedulableTasks.some((item) => item.taskId === task.id),
   ).length;
-  const deadlinesAtRisk = unschedulableTasks.filter((task) =>
-    ["NO_VALID_TIME_BEFORE_DEADLINE", "INSUFFICIENT_CAPACITY"].includes(
-      task.reasonCode,
-    ),
-  ).length;
+  const overdueTaskIds = new Set(
+    normalizedTasks
+      .filter((task) => isOverdueTask(task, input))
+      .map((task) => task.id ?? task.title),
+  );
+  const deadlineRiskTaskIds = new Set(overdueTaskIds);
+  unschedulableTasks.forEach((task) => {
+    if (
+      ["NO_VALID_TIME_BEFORE_DEADLINE", "INSUFFICIENT_CAPACITY"].includes(
+        task.reasonCode,
+      )
+    ) {
+      deadlineRiskTaskIds.add(task.taskId);
+    }
+  });
+  const overdueTaskCount = overdueTaskIds.size;
+  const deadlinesAtRisk = deadlineRiskTaskIds.size;
   const scheduledPercent =
     requiredMinutes === 0
       ? 100
@@ -1137,7 +1149,9 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       recurringGoalsBehind: recurringBehind,
       summary: riskiest
         ? `${scheduledPercent}% of estimated work fits. ${riskiest.title} is at greatest risk, with ${riskiest.unscheduledMinutes} minutes still unplaced.`
-        : `All estimated work fits with ${bufferMinutes} minutes left open for interruptions.`,
+        : overdueTaskCount > 0
+          ? `All estimated work fits, but ${overdueTaskCount} overdue ${overdueTaskCount === 1 ? "deadline is" : "deadlines are"} still at risk. ${bufferMinutes} minutes remain open for interruptions.`
+          : `All estimated work fits with ${bufferMinutes} minutes left open for interruptions.`,
     },
     availableMinutes,
     plannedMinutes,

@@ -1062,7 +1062,15 @@ function ImportView() {
     importError,
     analyzeText,
     tasks,
+    lastImportedTaskIds,
   } = usePlanPilot();
+  const latestImportedIds = new Set(lastImportedTaskIds);
+  const latestImportedTasks = tasks.filter(
+    (task) => task.id && latestImportedIds.has(task.id),
+  );
+  const latestReviewCount = latestImportedTasks.filter(
+    (task) => task.reviewRequired,
+  ).length;
   const [tab, setTab] = useState<"paste" | "txt">("paste");
   const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1147,9 +1155,11 @@ function ImportView() {
           <div className="state-card state-success">
             <CheckCircle2 size={20} />
             <div>
-              <strong>{tasks.length} responsibilities in your plan</strong>
+              <strong>
+                {latestImportedTasks.length} {latestImportedTasks.length === 1 ? "responsibility" : "responsibilities"} interpreted this time
+              </strong>
               <p>
-                {tasks.filter((task) => task.reviewRequired).length} need a quick review before scheduling. {" "}
+                {latestReviewCount} need a quick review before scheduling. {" "}
                 {extractionMode !== "local"
                   ? `Effort and useful session length were estimated by ${extractionMode === "gemini" ? "Gemini" : "OpenAI"}.`
                   : "Local estimates were used because AI is not connected."}
@@ -1636,9 +1646,10 @@ export function ScheduleSessionCard({
   } = usePlanPilot();
   const actionable = session.status === "proposed" || session.status === "approved";
   const statusLabel = session.status.replace("_", " ");
+  const isOverdue = session.reasonCodes.includes("OVERDUE_RECOVERY");
   return (
     <article
-      className={`schedule-session ${session.status === "approved" ? "session-approved" : ""}`}
+      className={`schedule-session ${session.status === "approved" ? "session-approved" : ""} ${isOverdue ? "session-overdue" : ""}`}
       draggable={actionable && !session.locked}
       onDragEnd={() => actionable && !session.locked && requestAnotherTime(session.id)}
     >
@@ -1657,6 +1668,15 @@ export function ScheduleSessionCard({
           <strong>{formatTime(session.start)}–{formatTime(session.end)}</strong>
           <span>{session.minutes} min</span>
         </div>
+        {isOverdue && (
+          <span
+            className="session-overdue-badge"
+            title="This work is scheduled after its stated deadline"
+          >
+            <AlertTriangle size={11} aria-hidden="true" />
+            Overdue
+          </span>
+        )}
         <button
           className="icon-button"
           onClick={() => toggleSessionLock(session.id)}
