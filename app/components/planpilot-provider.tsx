@@ -57,6 +57,7 @@ type PlanPilotContextValue = {
   updateTask: (id: string, patch: Partial<ExtractedTask>) => void;
   approveTask: (id: string) => void;
   deleteTask: (id: string) => void;
+  deleteTasks: (ids: string[]) => void;
   approveSession: (id: string) => void;
   approveAllSessions: () => void;
   toggleSessionLock: (id: string) => void;
@@ -536,18 +537,70 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     [updateTask],
   );
 
-  const deleteTask = useCallback(
-    (id: string) => {
-      if (!tasks.some((task) => task.id === id)) return;
-      rememberScheduleChange("task deletion");
-      setTasks((current) => {
-        const next = current.filter((task) => task.id !== id);
-        refresh(next);
-        return next;
-      });
-      setToast("Task removed.");
+  const deleteTasks = useCallback(
+    (ids: string[]) => {
+      const requestedIds = new Set(ids);
+      const removedTasks = tasks.filter(
+        (task) => task.id && requestedIds.has(task.id),
+      );
+      if (removedTasks.length === 0) return;
+
+      rememberScheduleChange(
+        removedTasks.length === 1 ? "task deletion" : "task group deletion",
+      );
+      const removedIds = new Set(
+        removedTasks
+          .map((task) => task.id)
+          .filter((id): id is string => !!id),
+      );
+      const nextTasks = tasks.filter(
+        (task) => !task.id || !removedIds.has(task.id),
+      );
+      const retainedTaskIds = new Set(
+        nextTasks
+          .map((task) => task.id)
+          .filter((id): id is string => !!id),
+      );
+      const preservedSessions = proposal.sessions.filter((session) =>
+        retainedTaskIds.has(session.taskId),
+      );
+      const preservedSessionIds = new Set(
+        preservedSessions.map((session) => session.id),
+      );
+
+      setTasks(nextTasks);
+      setLastImportedTaskIds((current) =>
+        current.filter((id) => !removedIds.has(id)),
+      );
+      setProposal(
+        scheduleFor(
+          nextTasks,
+          planningMode,
+          preservedSessions,
+          proposal.breaks.filter((item) =>
+            preservedSessionIds.has(item.afterSessionId),
+          ),
+        ),
+      );
+      setSelectedSessionIds((current) =>
+        current.filter((id) => preservedSessionIds.has(id)),
+      );
+      setSessionReviews((current) =>
+        current.filter((review) => preservedSessionIds.has(review.sessionId)),
+      );
+      setReplan(undefined);
+      setToast(
+        removedTasks.length === 1
+          ? "Task removed. You can undo this from Schedule."
+          : `${removedTasks.length} tasks removed. You can undo this from Schedule.`,
+      );
     },
-    [refresh, rememberScheduleChange, tasks],
+    [planningMode, proposal, rememberScheduleChange, tasks],
+  );
+
+  const deleteTask = useCallback(
+    (id: string) => deleteTasks([id]),
+    [deleteTasks],
   );
 
   const approveSession = useCallback((id: string) => {
@@ -952,6 +1005,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       updateTask,
       approveTask,
       deleteTask,
+      deleteTasks,
       approveSession,
       approveAllSessions,
       toggleSessionLock,
@@ -992,6 +1046,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       updateTask,
       approveTask,
       deleteTask,
+      deleteTasks,
       approveSession,
       approveAllSessions,
       toggleSessionLock,

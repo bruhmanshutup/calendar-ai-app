@@ -1120,9 +1120,13 @@ p {
 .confidence-legend i.high { background: var(--brand); }
 .confidence-legend i.medium { background: var(--amber); }
 .confidence-legend i.low { background: var(--red); }
-.filter-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.filter-tabs-row { align-items: center; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 12px; }
+.filter-tabs { display: flex; gap: 4px; }
 .filter-tabs button { background: transparent; border: 0; border-radius: 7px; color: var(--muted); font-size: 10.5px; padding: 8px 11px; }
 .filter-tabs button.active { background: var(--surface); box-shadow: var(--shadow-sm); color: var(--ink); font-weight: 680; }
+.filter-clear { align-items: center; background: var(--red-soft); border: 1px solid color-mix(in srgb, var(--red) 18%, transparent); border-radius: 7px; color: var(--red); display: flex; flex: none; font-size: 10.5px; font-weight: 650; gap: 5px; padding: 7px 10px; }
+.filter-clear:hover:not(:disabled) { border-color: color-mix(in srgb, var(--red) 42%, transparent); }
+.filter-clear:disabled { cursor: not-allowed; opacity: 0.45; }
 .review-list { display: grid; gap: 13px; }
 .task-review-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); overflow: hidden; }
 .task-review-card.needs-review { border-color: color-mix(in srgb, var(--amber) 35%, var(--line)); }
@@ -1473,6 +1477,9 @@ p {
   .review-summary { align-items: flex-start; flex-wrap: wrap; gap: 15px; padding: 14px; }
   .review-summary > div:not(.confidence-legend) { border: 0; margin: 0; min-width: 70px; }
   .confidence-legend { border-top: 1px solid var(--line); flex-basis: 100%; margin: 0; padding-top: 10px; }
+  .filter-tabs-row { align-items: stretch; flex-direction: column; }
+  .filter-tabs { overflow-x: auto; }
+  .filter-clear { justify-content: center; }
   .task-card-top { padding: 14px; }
   .source-quote { padding: 10px 14px; }
   .task-field-summary { grid-template-columns: repeat(2, 1fr); padding: 13px 14px; }

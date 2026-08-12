@@ -1474,7 +1474,7 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
 }
 
 function ReviewView() {
-  const { tasks, approveTask, lastImportedTaskIds } = usePlanPilot();
+  const { tasks, approveTask, deleteTasks, lastImportedTaskIds } = usePlanPilot();
   const latestIds = new Set(lastImportedTaskIds);
   const latestTasks = tasks.filter((task) => task.id && latestIds.has(task.id));
   const [filter, setFilter] = useState<"recent" | "review" | "ready" | "all">(
@@ -1492,6 +1492,28 @@ function ReviewView() {
   const scopedTasks = filter === "recent" ? latestTasks : tasks;
   const reviewCount = scopedTasks.filter((task) => task.reviewRequired).length;
   const allReviewCount = tasks.filter((task) => task.reviewRequired).length;
+  const clearLabel =
+    filter === "recent"
+      ? "Just added"
+      : filter === "review"
+        ? "Needs review"
+        : filter === "ready"
+          ? "Ready"
+          : "All tasks";
+  const clearShownTasks = () => {
+    const ids = shown
+      .map((task) => task.id)
+      .filter((id): id is string => !!id);
+    if (ids.length === 0) return;
+    if (
+      window.confirm(
+        `Remove ${ids.length} ${ids.length === 1 ? "task" : "tasks"} from ${clearLabel}? This also removes their scheduled sessions. You can undo this from Schedule.`,
+      )
+    ) {
+      deleteTasks(ids);
+      if (filter === "recent") setFilter("review");
+    }
+  };
   if (tasks.length === 0) {
     return (
       <>
@@ -1541,18 +1563,29 @@ function ReviewView() {
           <span><i className="low" /> Review field</span>
         </div>
       </div>
-      <div className="filter-tabs">
-        {([...(latestTasks.length > 0 ? ["recent" as const] : []), "review", "ready", "all"] as const).map((item) => (
-          <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>
-            {item === "recent"
-              ? `Just added (${latestTasks.length})`
-              : item === "review"
-                ? `Needs review (${allReviewCount})`
-                : item === "ready"
-                  ? `Ready (${tasks.length - allReviewCount})`
-                  : `All (${tasks.length})`}
-          </button>
-        ))}
+      <div className="filter-tabs-row">
+        <div className="filter-tabs">
+          {([...(latestTasks.length > 0 ? ["recent" as const] : []), "review", "ready", "all"] as const).map((item) => (
+            <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>
+              {item === "recent"
+                ? `Just added (${latestTasks.length})`
+                : item === "review"
+                  ? `Needs review (${allReviewCount})`
+                  : item === "ready"
+                    ? `Ready (${tasks.length - allReviewCount})`
+                    : `All (${tasks.length})`}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="filter-clear"
+          onClick={clearShownTasks}
+          disabled={shown.length === 0}
+          aria-label={`Clear ${clearLabel}`}
+        >
+          <Trash2 size={14} /> Clear {clearLabel}
+        </button>
       </div>
       <div className="review-list">
         {shown.length ? shown.map((task) => <TaskReviewCard task={task} key={task.id} />) : (
