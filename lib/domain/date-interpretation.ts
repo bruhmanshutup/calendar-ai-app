@@ -151,6 +151,32 @@ export function resolveRelativeDate(
   }
   const current = parse(currentLocalDate, "yyyy-MM-dd", new Date());
 
+  const relativeDayMatch = /^(today|tomorrow|tonight)(?:\s+at\s+(.+))?$/.exec(
+    normalized,
+  );
+  if (relativeDayMatch) {
+    const offset = relativeDayMatch[1] === "tomorrow" ? 1 : 0;
+    const date = format(addDays(startOfDay(current), offset), "yyyy-MM-dd");
+    const parsedTime = relativeDayMatch[2]
+      ? parseClockTime(relativeDayMatch[2])
+      : undefined;
+    if (relativeDayMatch[2] && !parsedTime) {
+      return {
+        date,
+        ambiguous: true,
+        explanation: "The date is clear, but the time is ambiguous.",
+      };
+    }
+    return {
+      date,
+      time: parsedTime,
+      instant: parsedTime
+        ? fromZonedTime(`${date}T${parsedTime}:00`, timeZone).toISOString()
+        : undefined,
+      ambiguous: false,
+    };
+  }
+
   const weekdayMatch = /^(?:(next|this)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+at\s+(.+))?$/.exec(
     normalized,
   );

@@ -434,6 +434,9 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         throw new Error(body.error?.message ?? "Extraction failed.");
       }
       const extractedTasks = body.tasks;
+      const localEstimateCount = extractedTasks.filter(
+        (task) => task.effortEstimateSource === "heuristic",
+      ).length;
       const merged = mergeImportedTasks(tasks, extractedTasks);
       const retainedTaskIds = new Set(
         merged.tasks
@@ -477,7 +480,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           title: `${merged.addedTasks.length} responsibilities added`,
           detail:
             body.extractionMode !== "local"
-              ? `${body.extractionMode === "gemini" ? "Gemini" : "OpenAI"} estimated effort and session length; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were reused.` : ""}${merged.removedMetadataCount > 0 ? ` ${merged.removedMetadataCount} non-task portal rows were removed.` : ""}${merged.refreshedTaskCount > 0 ? ` ${merged.refreshedTaskCount} earlier interpretations were corrected.` : ""}`
+              ? `${body.extractionMode === "gemini" ? "Gemini" : "OpenAI"} interpreted the responsibilities${localEstimateCount > 0 ? `; ${localEstimateCount} missed ${localEstimateCount === 1 ? "item uses a" : "items use"} fast local fallback estimate` : " and estimated effort and session length"}; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were reused.` : ""}${merged.removedMetadataCount > 0 ? ` ${merged.removedMetadataCount} non-task portal rows were removed.` : ""}${merged.refreshedTaskCount > 0 ? ` ${merged.refreshedTaskCount} earlier interpretations were corrected.` : ""}`
               : `Local fallback estimates were used; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were reused.` : ""}${merged.removedMetadataCount > 0 ? ` ${merged.removedMetadataCount} non-task portal rows were removed.` : ""}${merged.refreshedTaskCount > 0 ? ` ${merged.refreshedTaskCount} earlier interpretations were corrected.` : ""}`,
         },
         ...items,

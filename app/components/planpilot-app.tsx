@@ -1071,6 +1071,9 @@ function ImportView() {
   const latestReviewCount = latestImportedTasks.filter(
     (task) => task.reviewRequired,
   ).length;
+  const latestLocalEstimateCount = latestImportedTasks.filter(
+    (task) => task.effortEstimateSource === "heuristic",
+  ).length;
   const [tab, setTab] = useState<"paste" | "txt">("paste");
   const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1161,7 +1164,9 @@ function ImportView() {
               <p>
                 {latestReviewCount} need a quick review before scheduling. {" "}
                 {extractionMode !== "local"
-                  ? `Effort and useful session length were estimated by ${extractionMode === "gemini" ? "Gemini" : "OpenAI"}.`
+                  ? latestLocalEstimateCount > 0
+                    ? `${extractionMode === "gemini" ? "Gemini" : "OpenAI"} interpreted the list; ${latestLocalEstimateCount} ${latestLocalEstimateCount === 1 ? "item used a" : "items used"} fast local fallback estimate${latestLocalEstimateCount === 1 ? "" : "s"}.`
+                    : `Effort and useful session length were estimated by ${extractionMode === "gemini" ? "Gemini" : "OpenAI"}.`
                   : "Local estimates were used because AI is not connected."}
               </p>
             </div>

@@ -80,7 +80,11 @@ describe("Gemini extraction provider", () => {
       contents: Array<{ parts: Array<{ text: string }> }>;
     };
     expect(body.generationConfig.responseMimeType).toBe("application/json");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(body.contents[0].parts[0].text).toContain("estimatedMinutes");
+    expect(body.contents[0].parts[0].text).toContain(
+      "use the newest unquoted message as the primary source",
+    );
   });
 
   it.runIf(process.env.GEMINI_LIVE_TEST === "1")(

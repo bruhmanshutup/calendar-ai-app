@@ -136,6 +136,11 @@ function categoryFor(text: string): TaskCategory {
 
 function markdownText(text: string): string {
   return text
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/<[^>]+>/g, " ")
     .replace(/!?\[([^\]]+)]\([^)]+\)/g, "$1")
     .replace(/<https?:\/\/[^>]+>/gi, " ")
     .replace(/https?:\/\/\S+/gi, " ")
@@ -144,17 +149,109 @@ function markdownText(text: string): string {
     .trim();
 }
 
+function sourceFragments(text: string): string[] {
+  const normalized = text
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+    .replace(/\u00A0/g, " ")
+    .replace(/<\s*br\s*\/?\s*>/gi, "\n")
+    .replace(/<\s*li\b[^>]*>/gi, "• ")
+    .replace(/<\s*\/\s*(?:p|div|li|tr|h[1-6])\s*>/gi, "\n");
+  return normalized
+    .split(/\r?\n|(?<=[.!?])\s+(?=[A-Z])/)
+    .flatMap((line) =>
+      line
+        .replace(
+          /\s+(?=\d+[.)]\s+(?:apply|approve|book|call|complete|confirm|email|pay|read|reply|respond|review|send|sign|submit|upload)\b)/gi,
+          "\n",
+        )
+        .split(
+          /\s*;\s*(?=(?:\d+[.)]|\[[ xX]\]|[☐□⬜🔲•▪‣→])\s*)/u,
+        ),
+    )
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function actionableEmailSubject(text: string): string | undefined {
+  const match = /^subject\s*:\s*(.+)$/i.exec(text.trim());
+  if (!match) return undefined;
+  const subject = match[1].trim();
+  return /\b(?:action required|approval required|response required|please|urgent|asap|apply|approve|book|call|complete|confirm|pay|reply|respond|review|rsvp|send|sign|submit|upload)\b/i.test(
+    subject,
+  )
+    ? subject
+    : undefined;
+}
+
+function semanticText(line: string): string {
+  let value = line;
+  if (/^\s*\|.*\|\s*$/.test(value)) {
+    const cells = value
+      .split("|")
+      .map((cell) => cell.trim())
+      .filter(Boolean);
+    if (cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))) {
+      return "";
+    }
+    value = cells.join(" ");
+  }
+
+  const subject = actionableEmailSubject(value);
+  if (subject) value = subject;
+
+  return markdownText(value)
+    .replace(/^\[[^\]]+\]\s*[^:]{1,40}:\s*/u, "")
+    .replace(
+      /^[\p{L}][\p{L}\p{N} .'-]{0,30}:\s+(?=(?:please|kindly|can you|could you|would you|remember to|don't forget to|apply|approve|book|call|complete|confirm|pay|reply|respond|review|rsvp|send|sign|submit|upload)\b)/iu,
+      "",
+    )
+    .replace(/^(?:task|to-?do|action item)\s*:\s*/i, "")
+    .replace(/\b(?:due|deadline|estimate|duration|effort)\s*:\s*/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function agendaRangeMinutes(startText: string, endText: string): number | undefined {
+  const parseValue = (value: string, fallbackPeriod?: string) => {
+    const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(value.trim());
+    if (!match) return undefined;
+    let hour = Number(match[1]);
+    const minute = Number(match[2] ?? 0);
+    const period = (match[3] ?? fallbackPeriod)?.toLocaleLowerCase();
+    if (minute > 59 || hour > (period ? 12 : 23)) return undefined;
+    if (period === "am" && hour === 12) hour = 0;
+    if (period === "pm" && hour !== 12) hour += 12;
+    return hour * 60 + minute;
+  };
+  const endPeriod = /\b(am|pm)\b/i.exec(endText)?.[1];
+  const start = parseValue(startText, endPeriod);
+  const end = parseValue(endText);
+  if (start === undefined || end === undefined) return undefined;
+  const duration = end > start ? end - start : end + 24 * 60 - start;
+  return duration > 0 && duration <= 12 * 60 ? duration : undefined;
+}
+
 function titleFor(text: string, datePhrase?: string): string {
   return markdownText(text)
-    .replace(/^\s*(?:[-*•]|\d+[.)]|\[[ x]\])\s*/i, "")
-    .replace(/^(?:task|to-?do|action item|reminder)\s*:\s*/i, "")
+    .replace(
+      /^\s*(?:[-*•▪‣→☐□⬜🔲]|\d+[.)]|[ivxlcdm]+[.)]|\[[ xX]\])\s*/iu,
+      "",
+    )
+    .replace(/^(?:task|to-?do|action item|action required|reminder)\s*:\s*/i, "")
+    .replace(
+      /^(?:please|kindly|can you|could you|would you|make sure to|remember to|don't forget to)\s+/i,
+      "",
+    )
     .replace(datePhrase ?? /$^/, " ")
     .replace(/\s*\(\s*overdue\s*\)\s*/gi, " ")
-    .replace(/\b(?:by|before|on|due(?:\s+on)?)\s*$/i, "")
+    .replace(
+      /\b(?:by|before|on|due(?:\s+on)?)\s*(?=[,;:.!?—–-]*$)/i,
+      "",
+    )
     .replace(/\b(?:for\s+)?\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?)(?:\s+each)?\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/[\s,;:.!—–-]+$/, "");
+    .replace(/[\s,;:.!?—–-]+$/, "");
 }
 
 function recurrenceCount(text: string): number | undefined {
@@ -175,6 +272,7 @@ function extractDatePhrase(text: string): string | undefined {
   const timeSuffix =
     "(?:\\s+(?:at\\s+)?(?:\\d{1,2}:\\d{2}(?:\\s*(?:am|pm))?|\\d{1,2}\\s*(?:am|pm)))?";
   const patterns = [
+    new RegExp(`\\b(?:today|tomorrow|tonight)${timeSuffix}`, "i"),
     new RegExp(
       `\\b(?:next\\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)${timeSuffix}`,
       "i",
@@ -222,13 +320,13 @@ function localWeekWindow(
 
 function isFixedEvent(text: string): boolean {
   if (
-    /\b(?:book|choose|confirm|request|schedule|select)\b.{0,60}\b(?:appointment|reservation)\b/i.test(
+    /\b(?:book|cancel|choose|confirm|request|schedule|select)\b.{0,60}\b(?:appointment|reservation)\b/i.test(
       text,
     )
   ) {
     return false;
   }
-  return /\b(appointment|meeting|class|flight|reservation|interview)\b/i.test(
+  return /\b(appointment|meeting|stand-?up|webinar|workshop|lecture|office hours|class|flight|reservation|interview|scheduled session)\b/i.test(
     text,
   );
 }
@@ -266,13 +364,13 @@ function priorityFor(
 }
 
 function hasActionVerb(text: string): boolean {
-  return /\b(?:apply|attend|book|bring|build|buy|call|choose|clean|complete|confirm|create|deliver|do|draft|email|exercise|finish|fix|go|make|meet|pay|pick\s+up|practice|prepare|read|register|remember\s+to|renew|reply|request|return|review|run|schedule|select|send|study|submit|take|turn\s+in|update|upload|view|waive|wash|write)\b/i.test(
+  return /\b(?:apply|approve|attend|book|bring|build|buy|call|cancel|choose|clean|complete|confirm|create|deliver|do|draft|email|exercise|finish|fix|go|make|meet|pay|pick\s+up|practice|prepare|read|register|remember\s+to|renew|reply|request|respond|return|review|rsvp|run|schedule|select|send|sign|study|submit|take|turn\s+in|update|upload|view|waive|wash|write)\b/i.test(
     text,
   );
 }
 
 function hasTaskNoun(text: string): boolean {
-  return /\b(?:appointment|application|assignment|bill|birthday|deadline|dentist|dishes|doctor|errand|essay|exam|flight|form|groceries|gym|homework|interview|laundry|medication|meeting|payment|project|quiz|rent|report|reservation|taxes|test|therapy|workout)\b/i.test(
+  return /\b(?:appointment|application|approval|assignment|bill|birthday|deadline|dentist|dishes|doctor|errand|essay|exam|flight|form|groceries|gym|homework|interview|invoice|laundry|medication|meeting|payment|project|quiz|rent|report|reservation|response|signature|taxes|test|therapy|workout)\b/i.test(
     text,
   );
 }
@@ -280,6 +378,24 @@ function hasTaskNoun(text: string): boolean {
 function isClearlyNonTask(text: string): boolean {
   const trimmed = text.trim();
   return (
+    !trimmed ||
+    /^(?:>|☑|✅|✔|\[[xX]\])/u.test(trimmed) ||
+    /^on\s+.+\s+wrote\s*:\s*$/i.test(trimmed) ||
+    /\b(?:do not|don't|no need to|not required to|ignore|disregard)\b/i.test(
+      trimmed,
+    ) ||
+    /\b(?:already|previously|just)\s+(?:approved|booked|completed|confirmed|finished|paid|replied|responded|reviewed|sent|signed|submitted|uploaded)\b/i.test(
+      trimmed,
+    ) ||
+    /\b(?:has been|was|is)\s+(?:cancelled|canceled|completed|done|finished|submitted)\b/i.test(
+      trimmed,
+    ) ||
+    /^(?:confidentiality notice|this (?:email|message) (?:and|may)|unsubscribe\b)/i.test(
+      trimmed,
+    ) ||
+    /^(?:task|action|item)\s+(?:due|deadline|estimate|duration|owner)(?:\s+(?:due|deadline|estimate|duration|owner))*$/i.test(
+      trimmed,
+    ) ||
     /^(?:tasks?\s+)?due\s+in\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(
       trimmed,
     ) ||
@@ -436,13 +552,12 @@ function buildTask(
 
 export class MockTaskExtractionProvider implements TaskExtractionProvider {
   async extractTasks(input: ExtractionInput): Promise<ExtractionResult> {
-    const fragments = input.text
-      .split(/\r?\n|(?<=[.!?])\s+(?=[A-Z])/)
-      .map((line) => line.trim())
-      .filter(Boolean);
+    const fragments = sourceFragments(input.text);
     const lines = fragments.reduce<string[]>((items, fragment) => {
       if (
-        /^(?:about|roughly|approximately)\s+\d+/i.test(fragment) &&
+        /^(?:(?:about|roughly|approximately)\s+\d+|(?:due|deadline|when|time|estimate|duration|effort)\s*:)/i.test(
+          fragment,
+        ) &&
         items.length > 0
       ) {
         items[items.length - 1] = `${items[items.length - 1]} ${fragment}`;
@@ -453,9 +568,43 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
     }, []);
     const tasks: ExtractedTask[] = [];
     const ignoredStatements: ExtractionResult["ignoredStatements"] = [];
+    let agendaDateContext: string | undefined;
 
     lines.forEach((line, index) => {
-      const semanticLine = markdownText(line);
+      const baseSemanticLine = semanticText(line);
+      const agendaHeading =
+        /^(?:schedule|agenda|calendar|appointments?|events?)\s*(?:for|on)?\s*[:—–-]?\s*(.+)$/i.exec(
+          baseSemanticLine,
+        );
+      const headingDate = agendaHeading
+        ? extractDatePhrase(agendaHeading[1])
+        : undefined;
+      if (headingDate) {
+        agendaDateContext = headingDate;
+        ignoredStatements.push({
+          sourceText: line,
+          reason: "Schedule heading used as context for the entries below.",
+        });
+        return;
+      }
+      const agendaRange = agendaDateContext
+        ? /^(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(.+)$/i.exec(
+            baseSemanticLine,
+          )
+        : undefined;
+      const agendaSingle = agendaDateContext
+        ? /^(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s+(.+)$/i.exec(
+            baseSemanticLine,
+          )
+        : undefined;
+      const agendaMinutes = agendaRange
+        ? agendaRangeMinutes(agendaRange[1], agendaRange[2])
+        : undefined;
+      const semanticLine = agendaRange
+        ? `${agendaRange[3]} ${agendaDateContext} at ${agendaRange[1]}${agendaMinutes ? ` for ${agendaMinutes} minutes` : ""}`
+        : agendaSingle
+          ? `${agendaSingle[2]} ${agendaDateContext} at ${agendaSingle[1]}`
+          : baseSemanticLine;
       const alternatingWithoutClock =
         /\b(?:every\s+(?:other|second|2(?:nd)?)\s+day|on\s+alternate\s+days?|alternat(?:e|ing)\b.{0,40}\bdays?|day\s+on[\s,/-]+day\s+off)\b/i.test(
           semanticLine,
@@ -486,6 +635,15 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
             input.timeZone,
           )
         : undefined;
+      if (tasks.length >= 100) {
+        if (ignoredStatements.length < 100) {
+          ignoredStatements.push({
+            sourceText: line,
+            reason: "The import reached the 100-responsibility safety limit.",
+          });
+        }
+        return;
+      }
       tasks.push(
         {
           ...buildTask(
@@ -501,6 +659,9 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
       );
     });
 
-    return validateAndDedupeExtraction({ tasks, ignoredStatements });
+    return validateAndDedupeExtraction({
+      tasks,
+      ignoredStatements: ignoredStatements.slice(0, 100),
+    });
   }
 }

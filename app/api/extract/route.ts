@@ -6,6 +6,7 @@ import { OpenAITaskExtractionProvider } from "@/lib/providers/openai-extraction"
 import { recoverExplicitOverdueTasks } from "@/lib/providers/overdue-recovery";
 import { recoverTimedRecurrences } from "@/lib/providers/recurrence-recovery";
 import { recoverFlexibleRecurrences } from "@/lib/providers/flexible-recurrence-recovery";
+import { recoverConcreteFormattedTasks } from "@/lib/providers/format-recovery";
 import {
   prepareStructuredPlanExtractionInput,
   recoverStructuredLearningPlan,
@@ -81,9 +82,13 @@ export async function POST(request: Request): Promise<Response> {
       parsed.data,
       withTimedRecurrences,
     );
-    const result = recoverStructuredLearningPlan(
+    const withFormattedRecovery = await recoverConcreteFormattedTasks(
       parsed.data,
       withFlexibleRecurrences,
+    );
+    const result = recoverStructuredLearningPlan(
+      parsed.data,
+      withFormattedRecovery,
     );
     return NextResponse.json({ ...result, extractionMode: selected.mode });
   } catch (error) {
