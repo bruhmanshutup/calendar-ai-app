@@ -63,6 +63,13 @@ import {
   groupRecurrenceDaySchedules,
   recurrenceTimesForDay,
 } from "@/lib/domain/recurrence";
+import {
+  setCustomTaskSchedulingWindow,
+  setTaskSchedulingPreference,
+  TASK_SCHEDULING_PREFERENCE_OPTIONS,
+  taskSchedulingPreference,
+  type TaskSchedulingPreference,
+} from "@/lib/domain/task-scheduling-preference";
 import { usePlanPilot } from "./planpilot-provider";
 
 export type PlanPilotView =
@@ -1209,6 +1216,12 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
   const [expanded, setExpanded] = useState(task.reviewRequired ?? false);
   const [addingTimeFor, setAddingTimeFor] = useState<DayOfWeek>();
   const timingSummary = taskTimingSummary(task);
+  const schedulingPreference = taskSchedulingPreference(task);
+  const customPreferenceWindow =
+    task.schedulingConstraints?.preferredTimeWindows?.[0] ?? {
+      start: "09:00",
+      end: "17:00",
+    };
   const saveRecurringSchedules = (
     schedules: Partial<Record<DayOfWeek, string[]>>,
   ) => {
@@ -1330,6 +1343,74 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
             <strong>{timingSummary}</strong>
           </div>
         )}
+      </div>
+      <div className="task-preference-editor">
+        <label>
+          Scheduling preference <span>(optional)</span>
+          <select
+            aria-label={`Scheduling preference for ${task.title}`}
+            disabled={schedulingPreference === "fixed"}
+            value={schedulingPreference}
+            onChange={(event) =>
+              updateTask(task.id ?? "", {
+                schedulingConstraints: setTaskSchedulingPreference(
+                  task,
+                  event.target.value as TaskSchedulingPreference,
+                ),
+              })
+            }
+          >
+            {schedulingPreference === "fixed" && (
+              <option value="fixed">Fixed by event schedule</option>
+            )}
+            {TASK_SCHEDULING_PREFERENCE_OPTIONS.map((option) => (
+              <option value={option.value} key={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {schedulingPreference === "custom" && (
+          <div className="task-custom-time-window">
+            <label>
+              From
+              <input
+                type="time"
+                value={customPreferenceWindow.start}
+                aria-label={`Preferred start time for ${task.title}`}
+                onChange={(event) =>
+                  updateTask(task.id ?? "", {
+                    schedulingConstraints: setCustomTaskSchedulingWindow(task, {
+                      ...customPreferenceWindow,
+                      start: event.target.value,
+                    }),
+                  })
+                }
+              />
+            </label>
+            <label>
+              To
+              <input
+                type="time"
+                value={customPreferenceWindow.end}
+                aria-label={`Preferred end time for ${task.title}`}
+                onChange={(event) =>
+                  updateTask(task.id ?? "", {
+                    schedulingConstraints: setCustomTaskSchedulingWindow(task, {
+                      ...customPreferenceWindow,
+                      end: event.target.value,
+                    }),
+                  })
+                }
+              />
+            </label>
+          </div>
+        )}
+        <p>
+          {schedulingPreference === "fixed"
+            ? "This task already has an exact scheduled time."
+            : "A soft preference: deadlines and hard availability still come first."}
+        </p>
       </div>
       {task.dueDate && !task.dueTime && (
         <div className="assumption-note">

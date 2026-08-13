@@ -1154,6 +1154,14 @@ p {
 .task-field-summary > div > span:first-child { color: var(--faint); font-size: 8px; margin-bottom: 3px; text-transform: uppercase; }
 .task-field-summary strong { font-size: 10.5px; }
 .capitalize { text-transform: capitalize; }
+.task-preference-editor { align-items: end; border-top: 1px solid var(--line); display: grid; gap: 10px 14px; grid-template-columns: minmax(230px, 320px) auto minmax(180px, 1fr); padding: 12px 20px; }
+.task-preference-editor > label,
+.task-custom-time-window label { color: var(--muted); font-size: 8.5px; font-weight: 650; }
+.task-preference-editor > label > span { color: var(--faint); font-weight: 500; }
+.task-preference-editor select { display: block; height: 34px; margin-top: 5px; padding: 0 8px; width: 100%; }
+.task-preference-editor > p { color: var(--faint); font-size: 8.5px; margin: 0 0 8px; }
+.task-custom-time-window { align-items: end; display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(95px, 1fr)); }
+.task-custom-time-window input { display: block; height: 34px; margin-top: 5px; padding: 0 8px; width: 100%; }
 .assumption-note { align-items: center; background: var(--blue-soft); color: var(--muted); display: flex; font-size: 9px; gap: 8px; margin: 0 20px 12px; padding: 8px 10px; }
 .assumption-note svg { color: var(--blue); flex: none; }
 .missing-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 20px 12px; }
@@ -1423,6 +1431,8 @@ p {
   .changes-layout { grid-template-columns: 1fr; }
   .import-side { grid-template-columns: repeat(2, 1fr); }
   .task-edit-grid { grid-template-columns: repeat(2, 1fr); }
+  .task-preference-editor { grid-template-columns: minmax(220px, 1fr) auto; }
+  .task-preference-editor > p { grid-column: 1 / -1; }
   .settings-layout { grid-template-columns: 1fr; }
   .settings-nav { display: flex; overflow-x: auto; position: static; }
   .settings-nav a { border-bottom: 2px solid transparent; border-left: 0; white-space: nowrap; }
@@ -1489,6 +1499,8 @@ p {
   .task-field-summary > div { border-bottom: 1px solid var(--line); border-right: 0; padding: 9px 4px; }
   .task-edit-grid { grid-template-columns: 1fr; padding: 14px; }
   .task-edit-grid .check-field { grid-column: auto; }
+  .task-preference-editor { align-items: stretch; grid-template-columns: 1fr; padding: 12px 14px; }
+  .task-preference-editor > p { grid-column: auto; margin-bottom: 0; }
   .recurrence-day-grid { grid-template-columns: 1fr; }
   .sticky-review-action { align-items: stretch; flex-direction: column; gap: 10px; }
   .schedule-toolbar { flex-wrap: wrap; gap: 9px; padding: 9px; }
