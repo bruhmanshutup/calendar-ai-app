@@ -1222,6 +1222,13 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
       start: "09:00",
       end: "17:00",
     };
+  const interpretedRequiredWindow =
+    task.schedulingConstraints?.allowedTimeWindows
+      ?.map(
+        (window) =>
+          `${formatClockTime(window.start)}–${formatClockTime(window.end)}`,
+      )
+      .join(", ");
   const saveRecurringSchedules = (
     schedules: Partial<Record<DayOfWeek, string[]>>,
   ) => {
@@ -1351,17 +1358,28 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
             aria-label={`Scheduling preference for ${task.title}`}
             disabled={schedulingPreference === "fixed"}
             value={schedulingPreference}
-            onChange={(event) =>
+            onChange={(event) => {
+              if (
+                event.target.value === "fixed" ||
+                event.target.value === "interpreted_required"
+              ) {
+                return;
+              }
               updateTask(task.id ?? "", {
                 schedulingConstraints: setTaskSchedulingPreference(
                   task,
                   event.target.value as TaskSchedulingPreference,
                 ),
-              })
-            }
+              });
+            }}
           >
             {schedulingPreference === "fixed" && (
               <option value="fixed">Fixed by event schedule</option>
+            )}
+            {schedulingPreference === "interpreted_required" && (
+              <option value="interpreted_required">
+                Only {interpretedRequiredWindow} (interpreted from source)
+              </option>
             )}
             {TASK_SCHEDULING_PREFERENCE_OPTIONS.map((option) => (
               <option value={option.value} key={option.value}>
@@ -1409,7 +1427,9 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
         <p>
           {schedulingPreference === "fixed"
             ? "This task already has an exact scheduled time."
-            : "A soft preference: deadlines and hard availability still come first."}
+            : schedulingPreference === "interpreted_required"
+              ? "This required window came from the source. Choosing another option adds a soft preference without removing it."
+              : "A soft preference: deadlines and hard availability still come first."}
         </p>
       </div>
       {task.dueDate && !task.dueTime && (

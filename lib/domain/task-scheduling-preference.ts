@@ -39,6 +39,11 @@ export const TASK_SCHEDULING_PREFERENCE_OPTIONS = [
 export type TaskSchedulingPreference =
   (typeof TASK_SCHEDULING_PREFERENCE_OPTIONS)[number]["value"];
 
+export type TaskSchedulingPreferenceState =
+  | TaskSchedulingPreference
+  | "fixed"
+  | "interpreted_required";
+
 const DEFAULT_CUSTOM_WINDOW: ClockWindow = {
   start: "09:00",
   end: "17:00",
@@ -57,10 +62,14 @@ export function taskHasFixedSchedule(task: ExtractedTask): boolean {
 
 export function taskSchedulingPreference(
   task: ExtractedTask,
-): TaskSchedulingPreference | "fixed" {
+): TaskSchedulingPreferenceState {
   if (taskHasFixedSchedule(task)) return "fixed";
   const windows = task.schedulingConstraints?.preferredTimeWindows;
-  if (!windows?.length) return "none";
+  if (!windows?.length) {
+    return task.schedulingConstraints?.allowedTimeWindows?.length
+      ? "interpreted_required"
+      : "none";
+  }
   if (windows.length !== 1) return "custom";
   const preset = TASK_SCHEDULING_PREFERENCE_OPTIONS.find(
     (option) => option.value !== "none" && option.value !== "custom" &&

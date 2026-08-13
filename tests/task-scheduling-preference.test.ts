@@ -51,6 +51,40 @@ describe("per-task scheduling preferences", () => {
     });
   });
 
+  it("shows an interpreted hard window instead of incorrectly saying no preference", () => {
+    const dentist = task({
+      id: "dentist-hours",
+      title: "Call dentist",
+      schedulingConstraints: {
+        allowedTimeWindows: [{ start: "09:00", end: "17:00" }],
+      },
+    });
+
+    expect(taskSchedulingPreference(dentist)).toBe("interpreted_required");
+
+    const withPreference = {
+      ...dentist,
+      schedulingConstraints: setTaskSchedulingPreference(dentist, "afternoon"),
+    };
+    expect(taskSchedulingPreference(withPreference)).toBe("afternoon");
+    expect(withPreference.schedulingConstraints).toEqual({
+      allowedTimeWindows: [{ start: "09:00", end: "17:00" }],
+      preferredTimeWindows: [{ start: "12:00", end: "17:00" }],
+    });
+
+    const reset = {
+      ...withPreference,
+      schedulingConstraints: setTaskSchedulingPreference(
+        withPreference,
+        "none",
+      ),
+    };
+    expect(taskSchedulingPreference(reset)).toBe("interpreted_required");
+    expect(reset.schedulingConstraints).toEqual({
+      allowedTimeWindows: [{ start: "09:00", end: "17:00" }],
+    });
+  });
+
   it("removes only the optional preference when PlanPilot should decide", () => {
     const source = task({
       id: "workout",
