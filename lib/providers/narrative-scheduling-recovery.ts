@@ -13,6 +13,7 @@ import type {
   TaskCategory,
   TaskPriority,
 } from "@/lib/domain/types";
+import { consolidateNarrativeExtraction } from "./narrative-consolidation";
 
 type NarrativeTaskDefaults = {
   title: string;
@@ -489,9 +490,9 @@ export function recoverNarrativeSchedulingIntent(
     ensureNarrativeTasks(input, result.tasks),
     planningRules,
   ).slice(0, 100);
-  return validateAndDedupeExtraction({
+  return consolidateNarrativeExtraction(input, validateAndDedupeExtraction({
     tasks,
     ignoredStatements: result.ignoredStatements,
     planningRules,
-  });
+  }));
 }

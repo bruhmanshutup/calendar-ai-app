@@ -275,7 +275,11 @@ export const GEMINI_EXTRACTION_SCHEMA = {
             maxItems: 20,
             items: { type: "string" },
           },
-          sourceText: { type: "string" },
+          sourceText: {
+            type: "string",
+            description:
+              "Complete exact source span for this responsibility, including its contiguous duration, deadline, priority, recurrence, preference, dependency, and constraint details.",
+          },
           approved: { type: "boolean" },
           reviewRequired: { type: "boolean" },
         },

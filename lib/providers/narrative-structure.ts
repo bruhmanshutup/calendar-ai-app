@@ -1,7 +1,7 @@
 import type { ExtractionInput } from "@/lib/domain/types";
 import { prepareStructuredPlanExtractionInput } from "./structured-plan-recovery";
 
-type StructureRole =
+export type NarrativeStructureRole =
   | "action"
   | "dependent_action"
   | "possible_multiple_actions"
@@ -12,6 +12,14 @@ type StructureRole =
   | "email_subject"
   | "email_metadata"
   | "heading_or_context";
+
+export type NarrativeStructureSegment = {
+  paragraph: number;
+  line: number;
+  sentence: number;
+  role: NarrativeStructureRole;
+  text: string;
+};
 
 const MAX_STRUCTURE_SEGMENTS = 180;
 const MAX_STRUCTURE_HINT_CHARS = 8_000;
@@ -78,7 +86,7 @@ function classifySegment(
   segment: string,
   listLine: boolean,
   hasEarlierAction: boolean,
-): StructureRole {
+): NarrativeStructureRole {
   const text = segment.replace(BULLET_PREFIX, "").trim();
   if (EMAIL_SUBJECT.test(text)) return "email_subject";
   if (EMAIL_METADATA.test(text) || GREETING_OR_SIGNATURE.test(text)) {
@@ -111,6 +119,44 @@ function classifySegment(
   return "heading_or_context";
 }
 
+export function analyzeNarrativeStructure(
+  text: string,
+): NarrativeStructureSegment[] {
+  const normalized = text.replace(/\r\n?/g, "\n").trim();
+  if (!normalized) return [];
+  const segments: NarrativeStructureSegment[] = [];
+  normalized.split(/\n[ \t]*\n+/).some((paragraph, paragraphIndex) => {
+    let hasEarlierAction = false;
+    paragraph.split("\n").some((line, lineIndex) => {
+      if (!line.trim()) return false;
+      const listLine = BULLET_PREFIX.test(line);
+      splitSentences(line).some((sentence, sentenceIndex) => {
+        if (segments.length >= MAX_STRUCTURE_SEGMENTS) return true;
+        const role = classifySegment(sentence, listLine, hasEarlierAction);
+        segments.push({
+          paragraph: paragraphIndex + 1,
+          line: lineIndex + 1,
+          sentence: sentenceIndex + 1,
+          role,
+          text: sentence,
+        });
+        if (
+          role === "action" ||
+          role === "dependent_action" ||
+          role === "possible_multiple_actions" ||
+          role === "list_item"
+        ) {
+          hasEarlierAction = true;
+        }
+        return false;
+      });
+      return segments.length >= MAX_STRUCTURE_SEGMENTS;
+    });
+    return segments.length >= MAX_STRUCTURE_SEGMENTS;
+  });
+  return segments;
+}
+
 /**
  * Builds a small index-only map of the source's paragraph, newline, and sentence
  * structure. It intentionally does not repeat source text, so task source spans
@@ -121,37 +167,17 @@ export function buildNarrativeStructureHint(text: string): string | undefined {
   if (!normalized) return undefined;
   const paragraphs = normalized.split(/\n[ \t]*\n+/);
   const rows: string[] = [];
-  const roles: StructureRole[] = [];
-  let segmentCount = 0;
-
-  paragraphs.some((paragraph, paragraphIndex) => {
-    let hasEarlierAction = false;
-    const lines = paragraph.split("\n");
-    const labels: string[] = [];
-    lines.some((line, lineIndex) => {
-      if (!line.trim()) return false;
-      const listLine = BULLET_PREFIX.test(line);
-      const sentences = splitSentences(line);
-      sentences.some((sentence, sentenceIndex) => {
-        if (segmentCount >= MAX_STRUCTURE_SEGMENTS) return true;
-        const role = classifySegment(sentence, listLine, hasEarlierAction);
-        roles.push(role);
-        labels.push(`L${lineIndex + 1}.S${sentenceIndex + 1}=${role}`);
-        if (
-          role === "action" ||
-          role === "dependent_action" ||
-          role === "possible_multiple_actions" ||
-          role === "list_item"
-        ) {
-          hasEarlierAction = true;
-        }
-        segmentCount += 1;
-        return false;
-      });
-      return segmentCount >= MAX_STRUCTURE_SEGMENTS;
-    });
+  const segments = analyzeNarrativeStructure(text);
+  const roles = segments.map((segment) => segment.role);
+  const segmentCount = segments.length;
+  paragraphs.forEach((_, paragraphIndex) => {
+    const labels = segments
+      .filter((segment) => segment.paragraph === paragraphIndex + 1)
+      .map(
+        (segment) =>
+          `L${segment.line}.S${segment.sentence}=${segment.role}`,
+      );
     if (labels.length) rows.push(`P${paragraphIndex + 1}: ${labels.join("; ")}`);
-    return segmentCount >= MAX_STRUCTURE_SEGMENTS;
   });
 
   if (
