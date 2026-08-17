@@ -1,4 +1,5 @@
 import type { ExtractionInput, ExtractionResult } from "@/lib/domain/types";
+import { isExplicitDayAgenda } from "./day-agenda";
 
 const COMPLEX_SCHEDULING_LANGUAGE =
   /\b(?:after that|before that|beforehand|once (?:that|this) is done|and then|but (?:i|we) also|so (?:i|we) need|depends? on|prerequisite|split (?:it|this|that)?\s*(?:into|across|over)|sessions? (?:across|over)|avoid consecutive|back-to-back|if possible|i(?:'|’)d rather|i (?:would )?prefer|only open|business hours|do not schedule|don(?:'|’)t schedule|keep .{0,30} free|wake up|go to sleep)\b/i;
@@ -24,6 +25,7 @@ export function shouldUseFastLocalExtraction(
   local: ExtractionResult,
 ): boolean {
   if (local.tasks.length === 0 || input.text.length > 20_000) return false;
+  if (isExplicitDayAgenda(input.text)) return true;
   if (COMPLEX_SCHEDULING_LANGUAGE.test(input.text)) return false;
   if (
     local.tasks.some((task) =>

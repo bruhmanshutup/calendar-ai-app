@@ -13,6 +13,7 @@ import {
   prepareStructuredPlanExtractionInput,
   recoverStructuredLearningPlan,
 } from "../lib/providers/structured-plan-recovery";
+import { task } from "./fixtures";
 
 const CURRENT_DATE = "2026-08-12";
 
@@ -97,7 +98,74 @@ describe("large responsibility imports", () => {
       lockedSessions: [],
     });
 
-    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(performance.now() - started).toBeLessThan(1_000);
     expect(proposal.sessions.length + proposal.unschedulable.length).toBeGreaterThan(0);
   }, 10_000);
+
+  it("schedules the supported 250-task workspace in under one second", () => {
+    const tasks = Array.from({ length: 250 }, (_, index) =>
+      task({
+        id: `max-workspace-${index}`,
+        title: `Workspace responsibility ${index + 1}`,
+        estimatedMinutes: 90,
+      }),
+    );
+    const availability = availabilityForDays(120);
+    const started = performance.now();
+
+    const proposal = generateSchedule({
+      windowStart: availability[0].start,
+      windowEnd: availability.at(-1)!.end,
+      tasks,
+      preferences: DEFAULT_PREFERENCES,
+      availability,
+      unavailableEvents: [],
+      blockedTimes: [],
+      lockedSessions: [],
+    });
+
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(proposal.sessions).toHaveLength(250);
+    expect(proposal.unschedulable).toEqual([]);
+  }, 10_000);
+
+  it("keeps sparse weekly availability reachable on the large-workspace path", () => {
+    const tasks = Array.from({ length: 100 }, (_, index) =>
+      task({
+        id: `weekly-workspace-${index}`,
+        title: `Weekly-window responsibility ${index + 1}`,
+        estimatedMinutes: 90,
+      }),
+    );
+    const availability = Array.from({ length: 18 }, (_, index) => {
+      const date = format(
+        addDays(new Date(`${CURRENT_DATE}T12:00:00Z`), index * 7),
+        "yyyy-MM-dd",
+      );
+      return {
+        start: fromZonedTime(
+          `${date}T${DEFAULT_PREFERENCES.wakingTime}:00`,
+          DEFAULT_PREFERENCES.timeZone,
+        ).toISOString(),
+        end: fromZonedTime(
+          `${date}T${DEFAULT_PREFERENCES.sleepingTime}:00`,
+          DEFAULT_PREFERENCES.timeZone,
+        ).toISOString(),
+      };
+    });
+
+    const proposal = generateSchedule({
+      windowStart: availability[0].start,
+      windowEnd: availability.at(-1)!.end,
+      tasks,
+      preferences: DEFAULT_PREFERENCES,
+      availability,
+      unavailableEvents: [],
+      blockedTimes: [],
+      lockedSessions: [],
+    });
+
+    expect(proposal.sessions).toHaveLength(100);
+    expect(proposal.unschedulable).toEqual([]);
+  });
 });

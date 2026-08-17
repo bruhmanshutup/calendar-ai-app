@@ -33,6 +33,8 @@ import type {
 } from "./types";
 
 const MINUTE = 60_000;
+const zonedClockCache = new Map<string, number>();
+const ZONED_CLOCK_CACHE_LIMIT = 20_000;
 
 type NumericInterval = { start: number; end: number };
 
@@ -157,10 +159,6 @@ function uniqueSessionId(base: string, sessions: PlannedSession[]): string {
   return `${base}-v${version}`;
 }
 
-function overlaps(a: NumericInterval, b: NumericInterval): boolean {
-  return a.start < b.end && b.start < a.end;
-}
-
 function isInside(
   candidate: NumericInterval,
   availability: NumericInterval[],
@@ -188,12 +186,68 @@ function isFree(
   candidate: NumericInterval,
   busy: NumericInterval[],
 ): boolean {
-  return !busy.some((interval) => overlaps(candidate, interval));
+  let low = 0;
+  let high = busy.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (busy[middle].end <= candidate.start) low = middle + 1;
+    else high = middle;
+  }
+  return low >= busy.length || busy[low].start >= candidate.end;
+}
+
+function insertBusyInterval(
+  busy: NumericInterval[],
+  interval: NumericInterval,
+): void {
+  let low = 0;
+  let high = busy.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (busy[middle].end < interval.start) low = middle + 1;
+    else high = middle;
+  }
+  const first = low;
+  let end = interval.end;
+  let last = first;
+  while (last < busy.length && busy[last].start <= end) {
+    end = Math.max(end, busy[last].end);
+    last += 1;
+  }
+  busy.splice(first, last - first, {
+    start: Math.min(interval.start, busy[first]?.start ?? interval.start),
+    end,
+  });
 }
 
 function ceilToIncrement(value: number): number {
   const increment = SCHEDULER_INCREMENT_MINUTES * MINUTE;
   return Math.ceil(value / increment) * increment;
+}
+
+function floorToIncrement(value: number): number {
+  const increment = SCHEDULER_INCREMENT_MINUTES * MINUTE;
+  return Math.floor(value / increment) * increment;
+}
+
+function zonedClockInstant(date: string, time: string, timeZone: string): number {
+  const key = `${timeZone}:${date}:${time}`;
+  const cached = zonedClockCache.get(key);
+  if (cached !== undefined) return cached;
+  const instant = fromZonedTime(`${date}T${time}:00`, timeZone).getTime();
+  if (zonedClockCache.size >= ZONED_CLOCK_CACHE_LIMIT) zonedClockCache.clear();
+  zonedClockCache.set(key, instant);
+  return instant;
+}
+
+function* denseCandidateStarts(
+  start: number,
+  lastStart: number,
+): Generator<number> {
+  const increment = SCHEDULER_INCREMENT_MINUTES * MINUTE;
+  for (let candidate = start; candidate <= lastStart; candidate += increment) {
+    yield candidate;
+  }
 }
 
 function localParts(
@@ -433,6 +487,9 @@ function tasksInSchedulingOrder(
   availability: NumericInterval[],
   busy: NumericInterval[],
 ): ExtractedTask[] {
+  const riskByTask = new Map(
+    tasks.map((task) => [task, taskRisk(task, input, availability, busy)]),
+  );
   const standalone: ExtractedTask[] = [];
   const sequenceGroups = new Map<
     string,
@@ -468,8 +525,8 @@ function tasksInSchedulingOrder(
   while (ready.length > 0) {
     ready.sort(
       (first, second) =>
-        taskRisk(second.task, input, availability, busy) -
-          taskRisk(first.task, input, availability, busy) ||
+        (riskByTask.get(second.task) ?? 0) -
+          (riskByTask.get(first.task) ?? 0) ||
         (first.task.id ?? "").localeCompare(second.task.id ?? ""),
     );
     const next = ready.shift();
@@ -700,6 +757,32 @@ function candidateReasons(
   return [...new Set(reasons)];
 }
 
+function taskTargetStart(
+  task: ExtractedTask,
+  deadline: number,
+  input: SchedulingInput,
+): number {
+  const windowStart = new Date(input.windowStart).getTime();
+  const windowEnd = new Date(input.windowEnd).getTime();
+  const targetFraction =
+    task.schedulingConstraints?.avoidConsecutiveDays ||
+    (task.taskType === "recurring_goal" && (task.recurrence?.interval ?? 1) > 1)
+      ? 0
+      : task.dueAt || task.dueDate
+        ? task.priority === "urgent"
+          ? 0.2
+          : task.priority === "high"
+            ? 0.3
+            : task.priority === "medium"
+              ? 0.45
+              : 0.6
+        : 0.25;
+  const targetDeadline = Math.min(deadline, windowEnd);
+  return (
+    windowStart + Math.max(0, targetDeadline - windowStart) * targetFraction
+  );
+}
+
 function candidateScore(
   task: ExtractedTask,
   start: number,
@@ -732,22 +815,7 @@ function candidateScore(
     );
   }
 
-  const targetFraction =
-    task.schedulingConstraints?.avoidConsecutiveDays ||
-    (task.taskType === "recurring_goal" && (task.recurrence?.interval ?? 1) > 1)
-      ? 0
-      : task.dueAt || task.dueDate
-    ? task.priority === "urgent"
-      ? 0.2
-      : task.priority === "high"
-        ? 0.3
-        : task.priority === "medium"
-          ? 0.45
-          : 0.6
-    : 0.25;
-  const targetDeadline = Math.min(deadline, windowEnd);
-  const targetStart =
-    windowStart + Math.max(0, targetDeadline - windowStart) * targetFraction;
+  const targetStart = taskTargetStart(task, deadline, input);
   const distanceFromTargetHours = Math.abs(start - targetStart) / (60 * MINUTE);
   const distributionWeight =
     input.preferences.planningMode === "conservative"
@@ -801,6 +869,116 @@ function candidateScore(
   return score;
 }
 
+function sparseCandidateStarts(
+  task: ExtractedTask,
+  minutes: number,
+  deadline: number,
+  input: SchedulingInput,
+  interval: NumericInterval,
+  busy: NumericInterval[],
+  breakMinutes: number,
+): number[] {
+  const duration = (minutes + breakMinutes) * MINUTE;
+  const ideal = taskTargetStart(task, deadline, input);
+  const gaps: NumericInterval[] = [];
+  let cursor = interval.start;
+  let firstBusy = 0;
+  let busyEnd = busy.length;
+  while (firstBusy < busyEnd) {
+    const middle = (firstBusy + busyEnd) >>> 1;
+    if (busy[middle].end <= cursor) firstBusy = middle + 1;
+    else busyEnd = middle;
+  }
+  for (let index = firstBusy; index < busy.length; index += 1) {
+    const blocked = busy[index];
+    if (blocked.end <= cursor) continue;
+    if (blocked.start >= interval.end) break;
+    if (blocked.start > cursor) {
+      gaps.push({ start: cursor, end: Math.min(blocked.start, interval.end) });
+    }
+    cursor = Math.max(cursor, blocked.end);
+    if (cursor >= interval.end) break;
+  }
+  if (cursor < interval.end) gaps.push({ start: cursor, end: interval.end });
+
+  const taskWindows = [
+    ...input.preferences.preferredFocusWindows,
+    ...input.preferences.preferredRoutineWindows,
+    ...(task.schedulingConstraints?.allowedTimeWindows ?? []),
+    ...(task.schedulingConstraints?.preferredTimeWindows ?? []),
+  ];
+  const starts = new Set<number>();
+  const add = (value: number, minimum: number, maximum: number) => {
+    const clamped = Math.min(maximum, Math.max(minimum, value));
+    const rounded = floorToIncrement(clamped);
+    for (const candidate of [rounded, rounded + SCHEDULER_INCREMENT_MINUTES * MINUTE]) {
+      if (candidate >= minimum && candidate <= maximum) starts.add(candidate);
+    }
+  };
+
+  for (const gap of gaps) {
+    const minimum = ceilToIncrement(gap.start);
+    const maximum = floorToIncrement(gap.end - duration);
+    if (maximum < minimum) continue;
+    add(minimum, minimum, maximum);
+    add(maximum, minimum, maximum);
+    add(ideal, minimum, maximum);
+    const date = localParts(minimum, input.preferences.timeZone).date;
+    for (const window of taskWindows) {
+      const windowStartAt = zonedClockInstant(
+        date,
+        window.start,
+        input.preferences.timeZone,
+      );
+      let windowEndDate = date;
+      if (clockMinutes(window.end) <= clockMinutes(window.start)) {
+        windowEndDate = format(addDays(parseISO(date), 1), "yyyy-MM-dd");
+      }
+      const windowEndAt = zonedClockInstant(
+        windowEndDate,
+        window.end,
+        input.preferences.timeZone,
+      );
+      add(windowStartAt, minimum, maximum);
+      add(windowEndAt - minutes * MINUTE, minimum, maximum);
+    }
+  }
+  return [...starts].sort((first, second) => first - second);
+}
+
+function availabilityRangeForCapacity(
+  availability: NumericInterval[],
+  target: number,
+  requiredMinutes: number,
+): { start: number; end: number } | undefined {
+  if (availability.length === 0) return undefined;
+  const byDistance = availability
+    .map((interval, index) => ({
+      index,
+      minutes: intervalMinutes(interval),
+      distance:
+        target < interval.start
+          ? interval.start - target
+          : target > interval.end
+            ? target - interval.end
+            : 0,
+    }))
+    .sort(
+      (first, second) =>
+        first.distance - second.distance || first.index - second.index,
+    );
+  let capacity = 0;
+  let start = availability.length - 1;
+  let end = 0;
+  for (const candidate of byDistance) {
+    capacity += candidate.minutes;
+    start = Math.min(start, candidate.index);
+    end = Math.max(end, candidate.index);
+    if (capacity >= requiredMinutes) break;
+  }
+  return { start, end };
+}
+
 function findCandidate(
   task: ExtractedTask,
   minutes: number,
@@ -812,6 +990,7 @@ function findCandidate(
   demandingByDay: Map<string, number>,
   wasSplit: boolean,
   earliestStart?: number,
+  searchAllGenericAvailability = false,
 ): Candidate | undefined {
   const mode = PLANNING_MODE_CONFIG[input.preferences.planningMode];
   const taskSessions = sessions.filter((session) => session.taskId === task.id);
@@ -838,8 +1017,43 @@ function findCandidate(
   const breakMinutes =
     task.energyDemand === "high" ? input.preferences.preferredBreakMinutes : 0;
   let firstSequenceCandidateDate: string | undefined;
+  const sparseSearch = input.tasks.length >= 100;
+  const canLimitGenericSearch =
+    sparseSearch &&
+    !searchAllGenericAvailability &&
+    !task.dueAt &&
+    !task.dueDate &&
+    !task.recurrence &&
+    !taskSequence(task) &&
+    !task.schedulingConstraints?.allowedTimeWindows?.length &&
+    !task.schedulingConstraints?.avoidConsecutiveDays;
+  const genericTarget = canLimitGenericSearch
+    ? taskTargetStart(task, deadline, input)
+    : undefined;
+  const requestedMinutes = input.tasks.reduce(
+    (total, item) =>
+      total +
+      (item.estimatedMinutes ?? 0) * Math.max(1, item.recurrence?.count ?? 1),
+    0,
+  );
+  const genericAvailabilityRange =
+    genericTarget === undefined
+      ? undefined
+      : availabilityRangeForCapacity(
+          availability,
+          genericTarget,
+          requestedMinutes / Math.max(0.05, 1 - mode.bufferRatio),
+        );
 
-  for (const interval of availability) {
+  for (let intervalIndex = 0; intervalIndex < availability.length; intervalIndex += 1) {
+    if (
+      genericAvailabilityRange &&
+      (intervalIndex < genericAvailabilityRange.start ||
+        intervalIndex > genericAvailabilityRange.end)
+    ) {
+      continue;
+    }
+    const interval = availability[intervalIndex];
     const intervalStart = Math.max(
       interval.start,
       earliestStart ?? Number.NEGATIVE_INFINITY,
@@ -856,11 +1070,20 @@ function findCandidate(
     ) {
       break;
     }
-    for (
-      let start = ceilToIncrement(intervalStart);
-      start + minutes * MINUTE <= Math.min(interval.end, deadline);
-      start += increment
-    ) {
+    const lastStart = Math.min(interval.end, deadline) - minutes * MINUTE;
+    const candidateStarts: Iterable<number> =
+      sparseSearch
+        ? sparseCandidateStarts(
+            task,
+            minutes,
+            deadline,
+            input,
+            { start: intervalStart, end: Math.min(interval.end, deadline) },
+            busy,
+            breakMinutes,
+          )
+        : denseCandidateStarts(ceilToIncrement(intervalStart), lastStart);
+    for (const start of candidateStarts) {
       const end = start + minutes * MINUTE;
       const slot = { start, end };
       const local = localParts(start, input.preferences.timeZone);
@@ -995,6 +1218,21 @@ function findCandidate(
     }
   }
 
+  if (!bestCandidate && genericAvailabilityRange) {
+    return findCandidate(
+      task,
+      minutes,
+      deadline,
+      input,
+      availability,
+      busy,
+      sessions,
+      demandingByDay,
+      wasSplit,
+      earliestStart,
+      true,
+    );
+  }
   return bestCandidate;
 }
 
@@ -1256,7 +1494,7 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         explanation: explainReasons(reasons),
       };
       sessions.push(session);
-      busy.push(slot);
+      insertBusyInterval(busy, slot);
       newlyPlannedMinutes += minutes;
       if (progress) updateSequenceProgress(progress, task, sessions, input);
       continue;
@@ -1302,7 +1540,7 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
           explanation: explainReasons(reasons),
         };
         sessions.push(session);
-        busy.push({ start: slot.start, end: slot.end });
+        insertBusyInterval(busy, { start: slot.start, end: slot.end });
         newlyPlannedMinutes += minutes;
       }
       if (conflictedMinutes > 0) {
@@ -1417,7 +1655,10 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         explanation: explainReasons(candidate.reasons),
       };
       sessions.push(session);
-      busy.push({ start: candidate.start, end: candidate.end });
+      insertBusyInterval(busy, {
+        start: candidate.start,
+        end: candidate.end,
+      });
       newlyPlannedMinutes += minutes;
       if (task.energyDemand === "high") {
         const day = localParts(
@@ -1428,7 +1669,7 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         const breakStart = candidate.end;
         const breakEnd =
           breakStart + input.preferences.preferredBreakMinutes * MINUTE;
-        busy.push({ start: breakStart, end: breakEnd });
+        insertBusyInterval(busy, { start: breakStart, end: breakEnd });
         breaks.push({
           afterSessionId: sessionId,
           start: new Date(breakStart).toISOString(),
@@ -1506,7 +1747,25 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       .filter((task) => isOverdueTask(task, input))
       .map((task) => task.id ?? task.title),
   );
-  const deadlineRiskTaskIds = new Set(overdueTaskIds);
+  const lateSessionTaskIds = new Set(
+    normalizedTasks
+      .filter(
+        (task) => task.dueAt || task.dueDate || task.recurrence?.windowEnd,
+      )
+      .filter((task) => {
+        const deadline = statedTaskDeadline(task, input);
+        return sessions.some(
+          (session) =>
+            session.taskId === (task.id ?? task.title) &&
+            new Date(session.end).getTime() > deadline,
+        );
+      })
+      .map((task) => task.id ?? task.title),
+  );
+  const deadlineRiskTaskIds = new Set([
+    ...overdueTaskIds,
+    ...lateSessionTaskIds,
+  ]);
   unschedulableTasks.forEach((task) => {
     if (
       ["NO_VALID_TIME_BEFORE_DEADLINE", "INSUFFICIENT_CAPACITY"].includes(
@@ -1545,6 +1804,8 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         ? `${scheduledPercent}% of estimated work fits. ${riskiest.title} is at greatest risk, with ${riskiest.unscheduledMinutes} minutes still unplaced.`
         : overdueTaskCount > 0
           ? `All estimated work fits, but ${overdueTaskCount} overdue ${overdueTaskCount === 1 ? "deadline is" : "deadlines are"} still at risk. ${bufferMinutes} minutes remain open for interruptions.`
+          : lateSessionTaskIds.size > 0
+            ? `All estimated work fits, but ${lateSessionTaskIds.size} ${lateSessionTaskIds.size === 1 ? "deadline is" : "deadlines are"} at risk because confirmed work extends past ${lateSessionTaskIds.size === 1 ? "it" : "them"}. Confirmed placements remain protected.`
           : `All estimated work fits with ${bufferMinutes} minutes left open for interruptions.`,
     },
     availableMinutes,

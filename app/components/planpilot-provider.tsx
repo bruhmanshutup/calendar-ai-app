@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -15,6 +16,15 @@ import { DEFAULT_PREFERENCES } from "@/lib/defaults";
 import { generateSchedule } from "@/lib/domain/scheduler";
 import { latestSequenceTargetDate } from "@/lib/domain/task-sequence";
 import { mergeImportedTasks } from "@/lib/domain/task-import";
+import {
+  deadlineUpdateFields,
+  intervalOverlapsManualPlacement,
+  isManualPlacementAfterDeadline,
+  manuallyPlacedBreak,
+  manuallyPlacedSession,
+  sessionsForManualPlacementReflow,
+  type ManualDeadlineUpdate,
+} from "@/lib/domain/manual-placement";
 import {
   popPlanningUndo,
   pushPlanningUndo,
@@ -66,6 +76,11 @@ type PlanPilotContextValue = {
   toggleSessionLock: (id: string) => void;
   rejectSession: (id: string) => void;
   requestAnotherTime: (id: string) => void;
+  placeSessionManually: (
+    id: string,
+    start: string,
+    deadlineUpdate?: ManualDeadlineUpdate,
+  ) => void;
   selectedSessionIds: string[];
   toggleSelectedSession: (id: string) => void;
   exportApprovedSessions: () => Promise<void>;
@@ -344,6 +359,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<string>();
   const [workspaceStatus, setWorkspaceStatus] =
     useState<WorkspaceStatus>("loading");
+  const workspaceSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -373,7 +389,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           setTasks(saved.tasks);
           setPlanningRules(saved.planningRules ?? {});
           const preservedSessions = saved.proposal.sessions.filter(
-            (session) => session.status !== "proposed",
+            (session) => session.locked || session.status !== "proposed",
           );
           const preservedSessionIds = new Set(
             preservedSessions.map((session) => session.id),
@@ -415,29 +431,36 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (workspaceStatus !== "ready") return;
     const timer = window.setTimeout(() => {
-      void fetch("/api/workspace", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          state: {
-            version: 1,
-            schedulerVersion: CURRENT_SCHEDULER_VERSION,
-            tasks,
-            proposal,
-            importText,
-            history,
-            sessionReviews,
-            planningMode,
-            planningRules,
-            extractionMode,
-            replan,
-          },
-        }),
-      }).then((response) => {
-        if (!response.ok) {
-          setToast("A recent change could not be saved. Please try again.");
-        }
+      const body = JSON.stringify({
+        state: {
+          version: 1,
+          schedulerVersion: CURRENT_SCHEDULER_VERSION,
+          tasks,
+          proposal,
+          importText,
+          history,
+          sessionReviews,
+          planningMode,
+          planningRules,
+          extractionMode,
+          replan,
+        },
       });
+      workspaceSaveQueueRef.current = workspaceSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          const response = await fetch("/api/workspace", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body,
+          });
+          if (!response.ok) {
+            throw new Error("Workspace save failed.");
+          }
+        })
+        .catch(() => {
+          setToast("A recent change could not be saved. Please try again.");
+        });
     }, 450);
     return () => window.clearTimeout(timer);
   }, [
@@ -860,6 +883,143 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     [planningMode, planningRules, proposal, rememberScheduleChange, tasks],
   );
 
+  const placeSessionManually = useCallback(
+    (
+      id: string,
+      start: string,
+      deadlineUpdate?: ManualDeadlineUpdate,
+    ) => {
+      const target = proposal.sessions.find((session) => session.id === id);
+      const task = target
+        ? tasks.find((item) => item.id === target.taskId)
+        : undefined;
+      if (!target || !task) {
+        setToast("That scheduled task is no longer available.");
+        return;
+      }
+      if (
+        task.taskType === "fixed_time" ||
+        task.recurrence?.mode === "fixed_times"
+      ) {
+        setToast("Fixed commitments must be edited from the task details.");
+        return;
+      }
+      try {
+        let moved = manuallyPlacedSession(target, start);
+        const nextTasks = deadlineUpdate
+          ? tasks.map((item) =>
+              item.id === task.id
+                ? {
+                    ...item,
+                    ...deadlineUpdateFields(
+                      deadlineUpdate,
+                      DEFAULT_PREFERENCES.timeZone,
+                    ),
+                    fieldConfidence: {
+                      ...item.fieldConfidence,
+                      dueDate: 1,
+                      dueTime: deadlineUpdate.dueTime ? 1 : undefined,
+                    },
+                  }
+                : item,
+            )
+          : tasks;
+        const effectiveTask = nextTasks.find((item) => item.id === task.id);
+        const endsAfterDeadline = isManualPlacementAfterDeadline(
+          effectiveTask,
+          moved.end,
+          DEFAULT_PREFERENCES.timeZone,
+          planningRules.latestWorkTime ?? DEFAULT_PREFERENCES.sleepingTime,
+        );
+        if (deadlineUpdate && endsAfterDeadline) {
+          throw new Error("The new deadline must be at or after this session ends.");
+        }
+        if (endsAfterDeadline) {
+          moved = {
+            ...moved,
+            reasonCodes: ["USER_PLACEMENT", "OVERDUE_RECOVERY"],
+            explanation:
+              "Locked at the date and time you chose. It ends after the current deadline, and flexible work will be scheduled around your decision.",
+          };
+        }
+        const previousTargetBreak = proposal.breaks.find(
+          (item) => item.afterSessionId === id,
+        );
+        const movedBreak = manuallyPlacedBreak(
+          moved,
+          previousTargetBreak,
+          task.energyDemand === "high"
+            ? DEFAULT_PREFERENCES.preferredBreakMinutes
+            : 0,
+        );
+        const protectedUntil = movedBreak?.end ?? moved.end;
+        const preservedSessions = sessionsForManualPlacementReflow(
+          proposal.sessions,
+          nextTasks,
+          moved,
+          protectedUntil,
+        );
+        const preservedIds = new Set(
+          preservedSessions.map((session) => session.id),
+        );
+        const preservedBreaks = proposal.breaks.filter(
+          (item) =>
+            item.afterSessionId !== id &&
+            preservedIds.has(item.afterSessionId) &&
+            !intervalOverlapsManualPlacement(
+              item.start,
+              item.end,
+              moved,
+              protectedUntil,
+            ),
+        );
+        if (movedBreak) preservedBreaks.push(movedBreak);
+        const nextProposal = scheduleFor(
+          nextTasks,
+          planningMode,
+          preservedSessions,
+          preservedBreaks,
+          planningRules,
+        );
+
+        rememberScheduleChange("manual session placement");
+        setTasks(nextTasks);
+        setProposal(nextProposal);
+        setReplan(undefined);
+        setHistory((items) => [
+          {
+            id: `history-manual-move-${Date.now()}`,
+            at: nowLabel(),
+            icon: "move",
+            title: `${target.title} placed manually`,
+            detail: deadlineUpdate
+              ? "Your chosen time was locked and the deadline was updated. Flexible work was replanned around it."
+              : "Your chosen time was locked. Flexible work was replanned around it.",
+          },
+          ...items,
+        ]);
+        setToast(
+          deadlineUpdate
+            ? "Time locked and deadline updated. Flexible work moved around your choice."
+            : "Time locked. Flexible work moved around your choice.",
+        );
+      } catch (error) {
+        setToast(
+          error instanceof Error
+            ? error.message
+            : "That placement could not be saved.",
+        );
+      }
+    },
+    [
+      planningMode,
+      planningRules,
+      proposal,
+      rememberScheduleChange,
+      tasks,
+    ],
+  );
+
   const toggleSelectedSession = useCallback((id: string) => {
     setSelectedSessionIds((ids) =>
       ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id],
@@ -1131,7 +1291,15 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     setHistory([]);
     setSessionReviews([]);
     setScheduleUndoStack([]);
-    void fetch("/api/workspace", { method: "DELETE" });
+    workspaceSaveQueueRef.current = workspaceSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const response = await fetch("/api/workspace", { method: "DELETE" });
+        if (!response.ok) throw new Error("Workspace clear failed.");
+      })
+      .catch(() => {
+        setToast("The workspace was cleared here but could not be cleared from storage.");
+      });
     setToast("Workspace cleared. Planning mode and theme were kept.");
   }, [planningMode]);
 
@@ -1155,6 +1323,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       toggleSessionLock,
       rejectSession,
       requestAnotherTime,
+      placeSessionManually,
       selectedSessionIds,
       toggleSelectedSession,
       exportApprovedSessions,
@@ -1197,6 +1366,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       toggleSessionLock,
       rejectSession,
       requestAnotherTime,
+      placeSessionManually,
       selectedSessionIds,
       toggleSelectedSession,
       exportApprovedSessions,

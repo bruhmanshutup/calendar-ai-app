@@ -45,11 +45,22 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  useCallback,
+  useEffect,
+  useRef,
   useState,
   type ChangeEvent,
-  type DragEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { DEFAULT_PREFERENCES } from "@/lib/defaults";
+import {
+  deadlineUpdateFields,
+  isManualPlacementAfterDeadline,
+  manualPlacementEnd,
+  manualPlacementStart,
+  taskDeadlineInstant,
+} from "@/lib/domain/manual-placement";
 import type {
   DayOfWeek,
   ExtractedTask,
@@ -70,6 +81,7 @@ import {
   taskSchedulingPreference,
   type TaskSchedulingPreference,
 } from "@/lib/domain/task-scheduling-preference";
+import { taskSequence } from "@/lib/domain/task-sequence";
 import { usePlanPilot } from "./planpilot-provider";
 
 export type PlanPilotView =
@@ -121,6 +133,7 @@ const REASON_LABELS: Record<ScheduleReasonCode, string> = {
   MOVED_AFTER_MISSED: "Missed recovery",
   SEQUENCE_ORDER: "Plan order",
   FIXED_TIME: "Fixed time",
+  USER_PLACEMENT: "Your placement",
 };
 
 function formatTime(value: string): string {
@@ -159,6 +172,18 @@ function localDateKey(value = new Date()): string {
   const get = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function localTimeKey(value: string | Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: DEFAULT_PREFERENCES.timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(typeof value === "string" ? new Date(value) : value);
+  const get = (type: "hour" | "minute") =>
+    parts.find((part) => part.type === type)?.value ?? "00";
+  return `${get("hour")}:${get("minute")}`;
 }
 
 function shortDate(value?: string): string {
@@ -1489,11 +1514,43 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
           )}
           <label>
             Due date
-            <input type="date" value={task.dueDate ?? ""} onChange={(event) => updateTask(task.id ?? "", { dueDate: event.target.value || undefined })} />
+            <input
+              type="date"
+              value={task.dueDate ?? ""}
+              onChange={(event) => {
+                const dueDate = event.target.value;
+                updateTask(
+                  task.id ?? "",
+                  dueDate
+                    ? deadlineUpdateFields(
+                        { dueDate, dueTime: task.dueTime },
+                        DEFAULT_PREFERENCES.timeZone,
+                      )
+                    : { dueDate: undefined, dueTime: undefined, dueAt: undefined },
+                );
+              }}
+            />
           </label>
           <label>
             Due time
-            <input type="time" value={task.dueTime ?? ""} onChange={(event) => updateTask(task.id ?? "", { dueTime: event.target.value || undefined })} />
+            <input
+              type="time"
+              value={task.dueTime ?? ""}
+              disabled={!task.dueDate}
+              onChange={(event) => {
+                if (!task.dueDate) return;
+                updateTask(
+                  task.id ?? "",
+                  deadlineUpdateFields(
+                    {
+                      dueDate: task.dueDate,
+                      dueTime: event.target.value || undefined,
+                    },
+                    DEFAULT_PREFERENCES.timeZone,
+                  ),
+                );
+              }}
+            />
           </label>
           <label>
             Estimated minutes
@@ -1791,13 +1848,26 @@ export function ScheduleSessionCard({
   selectable = true,
   reasonExpanded,
   onReasonExpandedChange,
+  onMove,
+  onSessionPointerDown,
+  onSessionPointerMove,
+  onSessionPointerUp,
+  onSessionPointerCancel,
+  onSessionLostPointerCapture,
 }: {
   session: PlannedSession;
   selectable?: boolean;
   reasonExpanded?: boolean;
   onReasonExpandedChange?: (expanded: boolean) => void;
+  onMove?: (session: PlannedSession) => void;
+  onSessionPointerDown?: (event: ReactPointerEvent<HTMLElement>) => void;
+  onSessionPointerMove?: (event: ReactPointerEvent<HTMLElement>) => void;
+  onSessionPointerUp?: (event: ReactPointerEvent<HTMLElement>) => void;
+  onSessionPointerCancel?: (event: ReactPointerEvent<HTMLElement>) => void;
+  onSessionLostPointerCapture?: () => void;
 }) {
   const {
+    tasks,
     toggleSessionLock,
     rejectSession,
     requestAnotherTime,
@@ -1806,13 +1876,26 @@ export function ScheduleSessionCard({
     approveSession,
   } = usePlanPilot();
   const actionable = session.status === "proposed" || session.status === "approved";
+  const task = tasks.find((item) => item.id === session.taskId);
+  const manuallyMovable =
+    actionable &&
+    task?.taskType !== "fixed_time" &&
+    task?.recurrence?.mode !== "fixed_times";
+  const canMove = manuallyMovable;
   const statusLabel = session.status.replace("_", " ");
   const isOverdue = session.reasonCodes.includes("OVERDUE_RECOVERY");
   return (
     <article
       className={`schedule-session ${session.status === "approved" ? "session-approved" : ""} ${isOverdue ? "session-overdue" : ""}`}
-      draggable={actionable && !session.locked}
-      onDragEnd={() => actionable && !session.locked && requestAnotherTime(session.id)}
+      data-manually-draggable={canMove ? "true" : "false"}
+      onPointerDown={canMove ? onSessionPointerDown : undefined}
+      onPointerMove={canMove ? onSessionPointerMove : undefined}
+      onPointerUp={canMove ? onSessionPointerUp : undefined}
+      onPointerCancel={canMove ? onSessionPointerCancel : undefined}
+      onLostPointerCapture={
+        canMove ? onSessionLostPointerCapture : undefined
+      }
+      aria-label={`${session.title}, ${formatTime(session.start)} to ${formatTime(session.end)}${session.locked ? ", locked" : ""}`}
     >
       <div className="session-top">
         {selectable && session.status === "proposed" && (
@@ -1841,7 +1924,11 @@ export function ScheduleSessionCard({
         <button
           className="icon-button"
           onClick={() => toggleSessionLock(session.id)}
-          aria-label={session.locked ? "Unlock session" : "Lock session"}
+          aria-label={
+            session.locked
+              ? "Allow automatic schedule changes"
+              : "Protect from automatic schedule changes"
+          }
         >
           {session.locked ? <Lock size={15} /> : <LockOpen size={15} />}
         </button>
@@ -1857,7 +1944,8 @@ export function ScheduleSessionCard({
         {session.status === "proposed" ? (
           <button onClick={() => approveSession(session.id)}><Check size={13} /> Approve</button>
         ) : <Badge tone={session.status === "approved" || session.status === "completed" ? "success" : "neutral"}><Check size={12} /> {statusLabel}</Badge>}
-        {actionable && <button onClick={() => requestAnotherTime(session.id)} disabled={session.locked}><RotateCcw size={13} /> Another time</button>}
+        {onMove && manuallyMovable && <button onClick={() => onMove(session)} disabled={!canMove}><MoveRight size={13} /> Move</button>}
+        {manuallyMovable && <button onClick={() => requestAnotherTime(session.id)} disabled={session.locked}><RotateCcw size={13} /> Next opening</button>}
         {actionable && <button onClick={() => rejectSession(session.id)}><X size={13} /> Reject</button>}
       </div>
     </article>
@@ -1887,6 +1975,15 @@ function scheduleColumns(sessions: PlannedSession[]) {
   });
 }
 
+type ManualPlacementDraft = {
+  sessionId: string;
+  date: string;
+  time: string;
+  editingDeadline: boolean;
+  deadlineDate: string;
+  deadlineTime: string;
+};
+
 function ScheduleView() {
   const {
     tasks,
@@ -1897,7 +1994,8 @@ function ScheduleView() {
     approveSession,
     exportApprovedSessions,
     exportState,
-    requestAnotherTime,
+    placeSessionManually,
+    planningRules,
     canUndoSchedule,
     undoScheduleLabel,
     undoSchedule,
@@ -1905,6 +2003,20 @@ function ScheduleView() {
   const [mode, setMode] = useState<"week" | "list">("week");
   const [scope, setScope] = useState<"recent" | "all">("all");
   const [expandedReasonIds, setExpandedReasonIds] = useState<string[]>([]);
+  const [draggingSessionId, setDraggingSessionId] = useState<string>();
+  const [dragTargetDate, setDragTargetDate] = useState<string>();
+  const [placementDraft, setPlacementDraft] =
+    useState<ManualPlacementDraft>();
+  const pointerDragRef = useRef<{
+    sessionId: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    active: boolean;
+    targetDate?: string;
+  } | undefined>(undefined);
   const latestTaskIds = new Set(lastImportedTaskIds);
   const visibleSessions = proposal.sessions.filter(
     (session) => scope === "all" || latestTaskIds.has(session.taskId),
@@ -1943,10 +2055,329 @@ function ScheduleView() {
       .filter((session) => session.status === "proposed")
       .forEach((session) => approveSession(session.id));
   };
-  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+
+  const openPlacement = useCallback(
+    (
+      session: PlannedSession,
+      date = localDateKey(new Date(session.start)),
+      time = localTimeKey(session.start),
+    ) => {
+      const task = tasks.find((item) => item.id === session.taskId);
+      if (
+        !task ||
+        task.taskType === "fixed_time" ||
+        task.recurrence?.mode === "fixed_times"
+      ) {
+        return;
+      }
+      setPlacementDraft({
+        sessionId: session.id,
+        date,
+        time,
+        editingDeadline: false,
+        deadlineDate: task.dueDate ?? date,
+        deadlineTime: task.dueTime ?? "",
+      });
+    },
+    [tasks],
+  );
+  const resetDrag = useCallback(() => {
+    setDraggingSessionId(undefined);
+    setDragTargetDate(undefined);
+  }, []);
+  const beginPointerDrag = (
+    session: PlannedSession,
+    event: ReactPointerEvent<HTMLElement>,
+  ) => {
+    if (
+      event.button !== 0 ||
+      (event.target as Element).closest("button, input, a, select, textarea")
+    ) {
+      return;
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointerDragRef.current = {
+      sessionId: session.id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      active: false,
+    };
+  };
+  const scheduleDateAtPoint = useCallback((clientX: number, clientY: number) => {
+    const direct = document
+      .elementFromPoint(clientX, clientY)
+      ?.closest<HTMLElement>("[data-schedule-date]")
+      ?.dataset.scheduleDate;
+    if (direct) return direct;
+    return Array.from(
+      document.querySelectorAll<HTMLElement>("[data-schedule-date]"),
+    ).find((column) => {
+      const bounds = column.getBoundingClientRect();
+      return (
+        clientX >= bounds.left &&
+        clientX <= bounds.right &&
+        clientY >= bounds.top &&
+        clientY <= bounds.bottom
+      );
+    })?.dataset.scheduleDate;
+  }, []);
+  const continuePointerDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const current = pointerDragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    current.lastX = event.clientX;
+    current.lastY = event.clientY;
+    if (
+      !current.active &&
+      Math.hypot(
+        event.clientX - current.startX,
+        event.clientY - current.startY,
+      ) < 8
+    ) {
+      return;
+    }
+    if (!current.active) {
+      current.active = true;
+      setDraggingSessionId(current.sessionId);
+    }
     event.preventDefault();
-    const sessionId = event.dataTransfer.getData("text/plain");
-    if (sessionId) requestAnotherTime(sessionId);
+    const date = scheduleDateAtPoint(event.clientX, event.clientY);
+    if (date !== current.targetDate) {
+      current.targetDate = date;
+      setDragTargetDate(date);
+    }
+  };
+  const completePointerDrag = useCallback(() => {
+    const current = pointerDragRef.current;
+    if (!current) return;
+    const targetDate =
+      current.targetDate ?? scheduleDateAtPoint(current.lastX, current.lastY);
+    if (current.active && targetDate) {
+      const session = proposal.sessions.find(
+        (item) => item.id === current.sessionId,
+      );
+      if (session) {
+        openPlacement(
+          session,
+          targetDate,
+          localTimeKey(session.start),
+        );
+      }
+    }
+    pointerDragRef.current = undefined;
+    resetDrag();
+  }, [openPlacement, proposal.sessions, resetDrag, scheduleDateAtPoint]);
+  const finishPointerDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const current = pointerDragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    current.lastX = event.clientX;
+    current.lastY = event.clientY;
+    current.targetDate = scheduleDateAtPoint(event.clientX, event.clientY);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    completePointerDrag();
+  };
+  const cancelPointerDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    pointerDragRef.current = undefined;
+    resetDrag();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  useEffect(() => {
+    if (!placementDraft) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPlacementDraft(undefined);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [placementDraft]);
+
+  useEffect(() => {
+    if (!draggingSessionId) return;
+    const finishAtWindow = (event: PointerEvent) => {
+      if (pointerDragRef.current?.pointerId === event.pointerId) {
+        pointerDragRef.current.lastX = event.clientX;
+        pointerDragRef.current.lastY = event.clientY;
+        pointerDragRef.current.targetDate = scheduleDateAtPoint(
+          event.clientX,
+          event.clientY,
+        );
+        completePointerDrag();
+      }
+    };
+    window.addEventListener("pointerup", finishAtWindow, true);
+    return () => window.removeEventListener("pointerup", finishAtWindow, true);
+  }, [draggingSessionId, completePointerDrag, scheduleDateAtPoint]);
+
+  const placementSession = placementDraft
+    ? proposal.sessions.find(
+        (session) => session.id === placementDraft.sessionId,
+      )
+    : undefined;
+  const placementTask = placementSession
+    ? tasks.find((task) => task.id === placementSession.taskId)
+    : undefined;
+  let placementStartAt: string | undefined;
+  let placementEndAt: string | undefined;
+  let placementError: string | undefined;
+  if (placementDraft && placementSession) {
+    try {
+      placementStartAt = manualPlacementStart(
+        placementDraft.date,
+        placementDraft.time,
+        DEFAULT_PREFERENCES.timeZone,
+      );
+      placementEndAt = manualPlacementEnd(
+        placementStartAt,
+        placementSession.minutes,
+      );
+    } catch (error) {
+      placementError =
+        error instanceof Error ? error.message : "Choose a valid date and time.";
+    }
+  }
+  const currentDeadline = placementTask
+    ? taskDeadlineInstant(
+        placementTask,
+        DEFAULT_PREFERENCES.timeZone,
+        planningRules.latestWorkTime ?? DEFAULT_PREFERENCES.sleepingTime,
+      )
+    : undefined;
+  const isPastDeadline =
+    !!placementEndAt &&
+    isManualPlacementAfterDeadline(
+      placementTask,
+      placementEndAt,
+      DEFAULT_PREFERENCES.timeZone,
+      planningRules.latestWorkTime ?? DEFAULT_PREFERENCES.sleepingTime,
+    );
+  const placementBreakMinutes = placementSession
+    ? (proposal.breaks.find(
+        (item) => item.afterSessionId === placementSession.id,
+      )?.minutes ??
+      (placementTask?.energyDemand === "high"
+        ? DEFAULT_PREFERENCES.preferredBreakMinutes
+        : 0))
+    : 0;
+  const placementImpactEndAt = placementEndAt
+    ? placementBreakMinutes > 0
+      ? manualPlacementEnd(placementEndAt, placementBreakMinutes)
+      : placementEndAt
+    : undefined;
+  let deadlineEditError: string | undefined;
+  if (
+    placementDraft?.editingDeadline &&
+    placementTask &&
+    placementEndAt
+  ) {
+    try {
+      const updatedTask = {
+        ...placementTask,
+        ...deadlineUpdateFields(
+          {
+            dueDate: placementDraft.deadlineDate,
+            dueTime: placementDraft.deadlineTime || undefined,
+          },
+          DEFAULT_PREFERENCES.timeZone,
+        ),
+      };
+      if (
+        isManualPlacementAfterDeadline(
+          updatedTask,
+          placementEndAt,
+          DEFAULT_PREFERENCES.timeZone,
+          planningRules.latestWorkTime ?? DEFAULT_PREFERENCES.sleepingTime,
+        )
+      ) {
+        deadlineEditError = "The new deadline must be at or after this session ends.";
+      }
+    } catch (error) {
+      deadlineEditError =
+        error instanceof Error ? error.message : "Choose a valid deadline.";
+    }
+  }
+  const overlappingSessions =
+    placementStartAt && placementImpactEndAt && placementSession
+      ? proposal.sessions.filter(
+          (session) =>
+            session.id !== placementSession.id &&
+            new Date(placementStartAt).getTime() <
+              new Date(session.end).getTime() &&
+            new Date(session.start).getTime() <
+              new Date(placementImpactEndAt).getTime(),
+        )
+      : [];
+  const placementSequenceGroup = placementTask
+    ? taskSequence(placementTask)?.groupId
+    : undefined;
+  const relatedSessions = placementSession
+    ? proposal.sessions.filter((session) => {
+        if (session.id === placementSession.id) return false;
+        const task = tasks.find(
+          (item) => (item.id ?? item.title) === session.taskId,
+        );
+        return (
+          session.taskId === placementSession.taskId ||
+          (placementSequenceGroup !== undefined &&
+            task &&
+            taskSequence(task)?.groupId === placementSequenceGroup)
+        );
+      })
+    : [];
+  const flexibleSessionsToMove = [
+    ...overlappingSessions,
+    ...relatedSessions,
+  ].filter(
+    (session, index, all) =>
+      session.status === "proposed" &&
+      !session.locked &&
+      all.findIndex((item) => item.id === session.id) === index,
+  );
+  const flexibleOverlapCount = flexibleSessionsToMove.length;
+  const protectedOverlaps = overlappingSessions.filter(
+    (session) => session.status !== "proposed" || session.locked,
+  );
+  const protectedRelated = relatedSessions.filter(
+    (session) =>
+      (session.status !== "proposed" || session.locked) &&
+      !protectedOverlaps.some((item) => item.id === session.id),
+  );
+  const blockedOverlaps =
+    placementStartAt && placementImpactEndAt
+      ? (planningRules.blockedTimes ?? []).filter(
+          (interval) =>
+            new Date(placementStartAt).getTime() <
+              new Date(interval.end).getTime() &&
+            new Date(interval.start).getTime() <
+              new Date(placementImpactEndAt).getTime(),
+        )
+      : [];
+  const confirmPlacement = () => {
+    if (
+      !placementDraft ||
+      !placementSession ||
+      !placementStartAt ||
+      placementError ||
+      deadlineEditError
+    ) {
+      return;
+    }
+    placeSessionManually(
+      placementSession.id,
+      placementStartAt,
+      placementDraft.editingDeadline
+        ? {
+            dueDate: placementDraft.deadlineDate,
+            dueTime: placementDraft.deadlineTime || undefined,
+          }
+        : undefined,
+    );
+    setPlacementDraft(undefined);
   };
   if (tasks.length === 0) {
     return (
@@ -1977,7 +2408,7 @@ function ScheduleView() {
         detail={
           scope === "recent"
             ? "Showing the latest import. Earlier commitments still protect their time without cluttering this view."
-            : "Drag unlocked sessions, request another time, or approve only what works. Invalid placements are rejected."
+            : "Drag a flexible session to any visible day, verify the exact time, and PlanPilot will protect your choice while replanning flexible work."
         }
         actions={
           <>
@@ -2041,7 +2472,11 @@ function ScheduleView() {
                 }).format(new Date(session.start)) === day.date,
             );
             return (
-              <div className="week-column" key={day.date} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
+              <div
+                className={`week-column ${draggingSessionId ? "drag-ready" : ""} ${dragTargetDate === day.date ? "drag-target" : ""}`}
+                key={day.date}
+                data-schedule-date={day.date}
+              >
                 <header className={day.date === localDateKey() ? "today" : ""}>
                   <span>{day.label}</span><strong>{day.day}</strong>
                   {day.date === localDateKey() && <small>Today</small>}
@@ -2049,9 +2484,17 @@ function ScheduleView() {
                 <div className="day-capacity"><i style={{ width: `${Math.min(100, sessions.length * 24)}%` }} /><span>{sessions.reduce((sum, session) => sum + session.minutes, 0)}m planned</span></div>
                 <div className="day-sessions">
                   {sessions.map((session) => (
-                    <div key={session.id} onDragStart={(event) => event.dataTransfer.setData("text/plain", session.id)}>
+                    <div key={session.id}>
                       <ScheduleSessionCard
                         session={session}
+                        onMove={openPlacement}
+                        onSessionPointerDown={(event) =>
+                          beginPointerDrag(session, event)
+                        }
+                        onSessionPointerMove={continuePointerDrag}
+                        onSessionPointerUp={finishPointerDrag}
+                        onSessionPointerCancel={cancelPointerDrag}
+                        onSessionLostPointerCapture={completePointerDrag}
                         reasonExpanded={expandedReasonIds.includes(session.id)}
                         onReasonExpandedChange={(expanded) =>
                           setReasonExpanded(session.id, expanded)
@@ -2059,7 +2502,14 @@ function ScheduleView() {
                       />
                     </div>
                   ))}
-                  {sessions.length === 0 && <span className="open-day">Open capacity</span>}
+                  {sessions.length === 0 && !draggingSessionId && <span className="open-day">Open capacity</span>}
+                  {draggingSessionId && (
+                    <div className="day-drop-prompt" aria-hidden="true">
+                      <MoveRight size={16} />
+                      <strong>Place on {day.label} {day.day}</strong>
+                      <span>Drop, then verify the exact time</span>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -2072,6 +2522,7 @@ function ScheduleView() {
               <span className="list-day">{formatDay(session.start, true)}</span>
               <ScheduleSessionCard
                 session={session}
+                onMove={openPlacement}
                 reasonExpanded={expandedReasonIds.includes(session.id)}
                 onReasonExpandedChange={(expanded) =>
                   setReasonExpanded(session.id, expanded)
@@ -2079,6 +2530,248 @@ function ScheduleView() {
               />
             </div>
           ))}
+        </div>
+      )}
+      {placementDraft && placementSession && placementTask && (
+        <div
+          className="placement-backdrop"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              setPlacementDraft(undefined);
+            }
+          }}
+        >
+          <section
+            className="placement-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="placement-dialog-title"
+          >
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                confirmPlacement();
+              }}
+            >
+              <header>
+                <span><MoveRight size={19} /></span>
+                <div>
+                  <p>VERIFY MANUAL PLACEMENT</p>
+                  <h2 id="placement-dialog-title">Place “{placementSession.title}” here?</h2>
+                </div>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Cancel manual placement"
+                  onClick={() => setPlacementDraft(undefined)}
+                >
+                  <X size={16} />
+                </button>
+              </header>
+
+              <div className="placement-dialog-body">
+                <p className="placement-intro">
+                  Your confirmed time becomes protected. Automatic scheduling will
+                  move flexible work around it instead of overriding your choice.
+                </p>
+                <div className="placement-fields">
+                  <label>
+                    Date
+                    <input
+                      type="date"
+                      autoFocus
+                      value={placementDraft.date}
+                      min={weekColumns[0]?.date}
+                      max={weekColumns.at(-1)?.date}
+                      onChange={(event) =>
+                        setPlacementDraft((current) =>
+                          current
+                            ? { ...current, date: event.target.value }
+                            : current,
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Start time
+                    <input
+                      type="time"
+                      step={900}
+                      value={placementDraft.time}
+                      onChange={(event) =>
+                        setPlacementDraft((current) =>
+                          current
+                            ? { ...current, time: event.target.value }
+                            : current,
+                        )
+                      }
+                    />
+                  </label>
+                  <div className="placement-duration">
+                    <span>Result</span>
+                    <strong>
+                      {placementStartAt && placementEndAt
+                        ? `${formatDay(placementStartAt, true)} · ${formatTime(placementStartAt)}–${formatTime(placementEndAt)}`
+                        : "Choose a valid date and time"}
+                    </strong>
+                    <small>{placementSession.minutes} minutes · Pacific time</small>
+                  </div>
+                </div>
+                {placementError && (
+                  <p className="placement-field-error" role="alert">
+                    {placementError}
+                  </p>
+                )}
+
+                {isPastDeadline && (
+                  <section className="placement-deadline-warning">
+                    <span><AlertTriangle size={18} /></span>
+                    <div>
+                      <strong>This session ends after the current deadline.</strong>
+                      <p>
+                        {currentDeadline
+                          ? `Current deadline: ${
+                              placementTask.dueDate && !placementTask.dueTime
+                                ? `${shortDate(placementTask.dueDate)} at the end of your planning day`
+                                : `${formatDay(currentDeadline, true)} at ${formatTime(currentDeadline)}`
+                            }. Is there a new deadline?`
+                          : "Is there a new deadline?"}
+                      </p>
+                      {!placementDraft.editingDeadline && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPlacementDraft((current) =>
+                              current
+                                ? { ...current, editingDeadline: true }
+                                : current,
+                            )
+                          }
+                        >
+                          <PencilLine size={14} /> Change deadline
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {placementDraft.editingDeadline && (
+                  <fieldset className="placement-deadline-editor">
+                    <legend>New deadline</legend>
+                    <p>Leave the time blank to use the end of your planning day.</p>
+                    <div>
+                      <label>
+                        Deadline date
+                        <input
+                          type="date"
+                          value={placementDraft.deadlineDate}
+                          onChange={(event) =>
+                            setPlacementDraft((current) =>
+                              current
+                                ? { ...current, deadlineDate: event.target.value }
+                                : current,
+                            )
+                          }
+                        />
+                      </label>
+                      <label>
+                        Deadline time <span>Optional</span>
+                        <input
+                          type="time"
+                          value={placementDraft.deadlineTime}
+                          onChange={(event) =>
+                            setPlacementDraft((current) =>
+                              current
+                                ? { ...current, deadlineTime: event.target.value }
+                                : current,
+                            )
+                          }
+                        />
+                      </label>
+                    </div>
+                    {deadlineEditError && (
+                      <p className="placement-field-error" role="alert">
+                        {deadlineEditError}
+                      </p>
+                    )}
+                  </fieldset>
+                )}
+
+                {(flexibleOverlapCount > 0 ||
+                  protectedOverlaps.length > 0 ||
+                  protectedRelated.length > 0 ||
+                  blockedOverlaps.length > 0) && (
+                  <section className="placement-conflicts">
+                    <Info size={17} />
+                    <div>
+                      <strong>Your choice stays in place.</strong>
+                      {flexibleOverlapCount > 0 && (
+                        <p>
+                          {flexibleOverlapCount} flexible {flexibleOverlapCount === 1 ? "session" : "sessions"} in this time, its recovery break, or the same sequence will be moved automatically.
+                        </p>
+                      )}
+                      {protectedOverlaps.length > 0 && (
+                        <p>
+                          It or its recovery break overlaps protected work: {protectedOverlaps.map((session) => session.title).join(", ")}. That conflict will remain visible.
+                        </p>
+                      )}
+                      {protectedRelated.length > 0 && (
+                        <p>
+                          Protected related work stays in place, so any ordering conflict will remain visible.
+                        </p>
+                      )}
+                      {blockedOverlaps.length > 0 && (
+                        <p>
+                          It also overlaps {blockedOverlaps.length} protected {blockedOverlaps.length === 1 ? "time block" : "time blocks"}.
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                )}
+              </div>
+
+              <footer>
+                <button
+                  type="button"
+                  className="button button-secondary button-md"
+                  onClick={() => setPlacementDraft(undefined)}
+                >
+                  Cancel
+                </button>
+                {placementDraft.editingDeadline && (
+                  <button
+                    type="button"
+                    className="button button-secondary button-md"
+                    onClick={() =>
+                      setPlacementDraft((current) =>
+                        current
+                          ? { ...current, editingDeadline: false }
+                          : current,
+                      )
+                    }
+                  >
+                    Keep current deadline
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className="button button-primary button-md"
+                  disabled={
+                    !placementStartAt ||
+                    !!placementError ||
+                    !!deadlineEditError
+                  }
+                >
+                  <Check size={15} />
+                  {placementDraft.editingDeadline
+                    ? "Update deadline & place"
+                    : isPastDeadline
+                      ? "Keep deadline & place"
+                      : "Confirm & lock time"}
+                </button>
+              </footer>
+            </form>
+          </section>
         </div>
       )}
       <div className="schedule-bottom-grid">

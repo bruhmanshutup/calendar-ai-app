@@ -18,6 +18,50 @@ function taskFingerprint(task: ExtractedTask): string {
   return source || normalizedText(task.title);
 }
 
+function isLegacyDayAgendaInterpretation(task: ExtractedTask): boolean {
+  return /^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*[-–—:]/i.test(
+    task.title,
+  );
+}
+
+function hasCorrectedDayAgendaTiming(
+  existing: ExtractedTask,
+  incoming: ExtractedTask,
+): boolean {
+  const agendaSource =
+    /^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i.test(existing.sourceText);
+  const timingChanged =
+    existing.taskType !== "fixed_time" ||
+    existing.fixedStartAt !== incoming.fixedStartAt ||
+    existing.fixedEndAt !== incoming.fixedEndAt ||
+    existing.estimatedMinutes !== incoming.estimatedMinutes;
+  const onwardCertaintyChanged =
+    /\bonwards?\b/i.test(existing.sourceText) &&
+    (existing.reviewRequired !== incoming.reviewRequired ||
+      existing.approved !== incoming.approved);
+  return Boolean(
+    agendaSource &&
+      normalizedText(existing.title) === normalizedText(incoming.title) &&
+      incoming.taskType === "fixed_time" &&
+      incoming.fixedStartAt &&
+      incoming.fixedEndAt &&
+      (timingChanged || onwardCertaintyChanged),
+  );
+}
+
+function shouldRefreshDuplicate(
+  existing: ExtractedTask,
+  incoming: ExtractedTask,
+): boolean {
+  return (
+    /[*_~`\[\]]/.test(existing.title) ||
+    (isLegacyDayAgendaInterpretation(existing) &&
+      incoming.taskType === "fixed_time" &&
+      Boolean(incoming.fixedStartAt && incoming.fixedEndAt)) ||
+    hasCorrectedDayAgendaTiming(existing, incoming)
+  );
+}
+
 function isClearlyImportMetadata(task: ExtractedTask): boolean {
   const source = task.sourceText.trim();
   const title = normalizedText(task.title).replace(/[*_~`#]+/g, " ");
@@ -97,7 +141,7 @@ export function mergeImportedTasks(
         importedTaskIds.push(existingId);
       }
       const existing = existingByFingerprint.get(fingerprint);
-      if (existingId && existing && /[*_~`\[\]]/.test(existing.title)) {
+      if (existingId && existing && shouldRefreshDuplicate(existing, task)) {
         refreshedTasks.set(existingId, {
           ...task,
           id: existingId,

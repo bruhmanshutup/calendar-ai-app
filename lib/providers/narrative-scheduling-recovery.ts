@@ -14,6 +14,7 @@ import type {
   TaskPriority,
 } from "@/lib/domain/types";
 import { consolidateNarrativeExtraction } from "./narrative-consolidation";
+import { isExplicitDayAgenda } from "./day-agenda";
 
 type NarrativeTaskDefaults = {
   title: string;
@@ -484,6 +485,9 @@ export function recoverNarrativeSchedulingIntent(
   input: ExtractionInput,
   result: ExtractionResult,
 ): ExtractionResult {
+  if (isExplicitDayAgenda(input.text)) {
+    return validateAndDedupeExtraction(result);
+  }
   const planningRules = mergePlanningRules(input, result.planningRules);
   const tasks = enrichTasks(
     input,

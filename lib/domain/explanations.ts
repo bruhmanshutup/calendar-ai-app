@@ -21,6 +21,8 @@ const EXPLANATIONS: Record<ScheduleReasonCode, string> = {
   SEQUENCE_ORDER:
     "Placed after the preceding plan step so the Week/Day progression stays in order.",
   FIXED_TIME: "Kept at the explicit fixed time from the source.",
+  USER_PLACEMENT:
+    "Locked at the date and time you chose so automatic scheduling works around it.",
 };
 
 export function explainReasons(reasons: ScheduleReasonCode[]): string {

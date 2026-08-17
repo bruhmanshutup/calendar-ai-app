@@ -87,6 +87,103 @@ describe("responsibility imports", () => {
     expect(result.refreshedTaskCount).toBe(1);
   });
 
+  it("repairs a legacy agenda row without duplicating the responsibility", () => {
+    const sourceText = "6:30 PM — Group project meeting";
+    const existing = task({
+      id: "legacy-meeting",
+      title: sourceText,
+      sourceText,
+      taskType: "fixed_time",
+      fixedStartAt: "2026-08-21T01:30:00.000Z",
+      fixedEndAt: "2026-08-21T02:30:00.000Z",
+    });
+    const corrected = task({
+      id: "incoming",
+      title: "Group project meeting",
+      sourceText,
+      taskType: "fixed_time",
+      fixedStartAt: "2026-08-19T01:30:00.000Z",
+      fixedEndAt: "2026-08-19T02:15:00.000Z",
+    });
+
+    const result = mergeImportedTasks([existing], [corrected]);
+
+    expect(result.tasks).toEqual([
+      expect.objectContaining({
+        id: "legacy-meeting",
+        title: "Group project meeting",
+        fixedStartAt: "2026-08-19T01:30:00.000Z",
+        fixedEndAt: "2026-08-19T02:15:00.000Z",
+      }),
+    ]);
+    expect(result.addedTasks).toEqual([]);
+    expect(result.refreshedTaskCount).toBe(1);
+  });
+
+  it("refreshes corrected timing for an otherwise clean agenda row", () => {
+    const sourceText = "6:00 PM — Email Professor Anderson";
+    const existing = task({
+      id: "existing-email",
+      title: "Email Professor Anderson",
+      sourceText,
+      taskType: "fixed_time",
+      fixedStartAt: "2026-08-18T01:00:00.000Z",
+      fixedEndAt: "2026-08-18T01:45:00.000Z",
+      estimatedMinutes: 45,
+    });
+    const corrected = task({
+      id: "incoming-email",
+      title: "Email Professor Anderson",
+      sourceText,
+      taskType: "fixed_time",
+      fixedStartAt: "2026-08-18T01:00:00.000Z",
+      fixedEndAt: "2026-08-18T01:30:00.000Z",
+      estimatedMinutes: 30,
+    });
+
+    const result = mergeImportedTasks([existing], [corrected]);
+
+    expect(result.tasks).toEqual([
+      expect.objectContaining({
+        id: "existing-email",
+        fixedEndAt: "2026-08-18T01:30:00.000Z",
+        estimatedMinutes: 30,
+      }),
+    ]);
+    expect(result.refreshedTaskCount).toBe(1);
+  });
+
+  it("preserves approval when an agenda row is re-imported unchanged", () => {
+    const sourceText = "7:30 PM — Gym";
+    const existing = task({
+      id: "approved-gym",
+      title: "Gym",
+      sourceText,
+      taskType: "fixed_time",
+      fixedStartAt: "2026-08-18T02:30:00.000Z",
+      fixedEndAt: "2026-08-18T03:30:00.000Z",
+      estimatedMinutes: 60,
+      approved: true,
+      reviewRequired: false,
+    });
+    const duplicate = task({
+      id: "incoming-gym",
+      title: "Gym",
+      sourceText,
+      taskType: "fixed_time",
+      fixedStartAt: existing.fixedStartAt,
+      fixedEndAt: existing.fixedEndAt,
+      estimatedMinutes: 60,
+      approved: false,
+      reviewRequired: true,
+    });
+
+    const result = mergeImportedTasks([existing], [duplicate]);
+
+    expect(result.tasks).toEqual([existing]);
+    expect(result.refreshedTaskCount).toBe(0);
+  });
+
   it("replaces prior collapsed learning-plan summaries when checklist items are recovered", () => {
     const collapsedPlan = task({
       id: "collapsed-plan",

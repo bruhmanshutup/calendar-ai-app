@@ -192,7 +192,8 @@ export type ScheduleReasonCode =
   | "STABILITY_PRESERVED"
   | "MOVED_AFTER_MISSED"
   | "SEQUENCE_ORDER"
-  | "FIXED_TIME";
+  | "FIXED_TIME"
+  | "USER_PLACEMENT";
 
 export type PlannedSession = {
   id: string;

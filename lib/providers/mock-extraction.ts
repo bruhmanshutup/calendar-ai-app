@@ -1,4 +1,5 @@
 import {
+  addDays,
   addWeeks,
   addHours,
   differenceInCalendarDays,
@@ -21,6 +22,7 @@ import type {
   TaskPriority,
 } from "@/lib/domain/types";
 import type { TaskExtractionProvider } from "./task-extraction";
+import { dayAgendaDateContext } from "./day-agenda";
 import {
   parseTimedRecurrence,
   type ParsedTimedRecurrence,
@@ -522,6 +524,7 @@ function buildTask(
   input: ExtractionInput,
   index: number,
   timedRecurrence?: ParsedTimedRecurrence,
+  agendaTiming?: { fixed: true; fixedEndAt?: string },
 ): ExtractedTask {
   const estimate = estimateMinutes(line);
   const count = recurrenceCount(line);
@@ -530,7 +533,8 @@ function buildTask(
       line,
     );
   const fixed =
-    !timedRecurrence && isFixedEvent(line) && !isDeadlineLanguage(line);
+    agendaTiming?.fixed ||
+    (!timedRecurrence && isFixedEvent(line) && !isDeadlineLanguage(line));
   const taskType =
     timedRecurrence || count
       ? "recurring_goal"
@@ -544,10 +548,10 @@ function buildTask(
     input.currentLocalDate,
   );
   const fixedStartAt = fixed ? interpreted?.instant : undefined;
-  const fixedEndAt =
-    fixedStartAt && /\bfor\s+\d+/i.test(line)
+  const fixedEndAt = agendaTiming?.fixedEndAt ??
+    (fixedStartAt && (agendaTiming?.fixed || /\bfor\s+\d+/i.test(line))
       ? addHours(new Date(fixedStartAt), estimate.minutes / 60).toISOString()
-      : undefined;
+      : undefined);
   const missingInformation: string[] = [];
   if (estimate.assumed) missingInformation.push("Confirm effort estimate");
   if (!interpreted?.date && !count && !fixed && !timedRecurrence) {
@@ -636,11 +640,25 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
       return items;
     }, []);
     const tasks: ExtractedTask[] = [];
+    const agendaTaskIds = new Set<string>();
+    const agendaOnwardTaskIds = new Set<string>();
     const ignoredStatements: ExtractionResult["ignoredStatements"] = [];
     let agendaDateContext: string | undefined;
+    const agendaBlockedTimes: NonNullable<
+      ExtractionResult["planningRules"]
+    >["blockedTimes"] = [];
 
     lines.forEach((line, index) => {
       const baseSemanticLine = semanticText(line);
+      const dayHeading = dayAgendaDateContext(baseSemanticLine);
+      if (dayHeading) {
+        agendaDateContext = dayHeading;
+        ignoredStatements.push({
+          sourceText: line,
+          reason: "Weekday heading used as context for the entries below.",
+        });
+        return;
+      }
       const agendaHeading =
         /^(?:schedule|agenda|calendar|appointments?|events?)\s*(?:for|on)?\s*[:—–-]?\s*(.+)$/i.exec(
           baseSemanticLine,
@@ -656,13 +674,49 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
         });
         return;
       }
+      const protectedTime = agendaDateContext
+        ? /^after\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s*(?:[-–—:]\s*)?(?:keep(?:\s+.+)?\s+free|free|do not schedule|don't schedule)\s*$/i.exec(
+            baseSemanticLine,
+          )
+        : undefined;
+      if (protectedTime) {
+        const interpretedStart = resolveRelativeDate(
+          `${agendaDateContext} at ${protectedTime[1]}`,
+          input.currentLocalDate,
+          input.timeZone,
+        );
+        if (interpretedStart.date && interpretedStart.instant) {
+          const nextDate = format(
+            addDays(parseISO(interpretedStart.date), 1),
+            "yyyy-MM-dd",
+          );
+          agendaBlockedTimes.push({
+            start: interpretedStart.instant,
+            end: fromZonedTime(
+              `${nextDate}T00:00:00`,
+              input.timeZone,
+            ).toISOString(),
+            label: "Protected free time",
+          });
+          ignoredStatements.push({
+            sourceText: line,
+            reason: "Protected free time added as a scheduling rule.",
+          });
+          return;
+        }
+      }
       const agendaRange = agendaDateContext
-        ? /^(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(.+)$/i.exec(
+        ? /^(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:[-–—:]\s*)?(.+)$/i.exec(
+            baseSemanticLine,
+          )
+        : undefined;
+      const agendaOnward = agendaDateContext
+        ? /^(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s+(?:onward|onwards)\s*(?:[-–—:]\s*)?(.+)$/i.exec(
             baseSemanticLine,
           )
         : undefined;
       const agendaSingle = agendaDateContext
-        ? /^(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s+(.+)$/i.exec(
+        ? /^(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s*(?:[-–—:]\s*)?(.+)$/i.exec(
             baseSemanticLine,
           )
         : undefined;
@@ -671,9 +725,12 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
         : undefined;
       const semanticLine = agendaRange
         ? `${agendaRange[3]} ${agendaDateContext} at ${agendaRange[1]}${agendaMinutes ? ` for ${agendaMinutes} minutes` : ""}`
+        : agendaOnward
+          ? `${agendaOnward[2]} ${agendaDateContext} at ${agendaOnward[1]}`
         : agendaSingle
           ? `${agendaSingle[2]} ${agendaDateContext} at ${agendaSingle[1]}`
           : baseSemanticLine;
+      const agendaFixed = Boolean(agendaRange || agendaOnward || agendaSingle);
       const alternatingWithoutClock =
         /\b(?:every\s+(?:other|second|2(?:nd)?)\s+day|on\s+alternate\s+days?|alternat(?:e|ing)\b.{0,40}\bdays?|day\s+on[\s,/-]+day\s+off)\b/i.test(
           semanticLine,
@@ -704,6 +761,12 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
             input.timeZone,
           )
         : undefined;
+      const agendaFixedEndAt = agendaOnward && interpreted?.date
+        ? fromZonedTime(
+            `${format(addDays(parseISO(interpreted.date), 1), "yyyy-MM-dd")}T00:00:00`,
+            input.timeZone,
+          ).toISOString()
+        : undefined;
       if (tasks.length >= 100) {
         if (ignoredStatements.length < 100) {
           ignoredStatements.push({
@@ -713,24 +776,86 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
         }
         return;
       }
-      tasks.push(
-        {
-          ...buildTask(
-            semanticLine,
-            datePhrase,
-            interpreted,
-            input,
-            index,
-            timedRecurrence,
-          ),
-          sourceText: line,
-        },
+      const task = {
+        ...buildTask(
+          semanticLine,
+          datePhrase,
+          interpreted,
+          input,
+          index,
+          timedRecurrence,
+          agendaFixed
+            ? { fixed: true, fixedEndAt: agendaFixedEndAt }
+            : undefined,
+        ),
+        sourceText: line,
+      };
+      tasks.push(task);
+      if (agendaFixed && task.id) agendaTaskIds.add(task.id);
+      if (agendaOnward && task.id) agendaOnwardTaskIds.add(task.id);
+    });
+
+    const agendaBoundaries = [
+      ...tasks
+        .filter(
+          (task) =>
+            task.id && agendaTaskIds.has(task.id) && task.fixedStartAt,
+        )
+        .map((task) => new Date(task.fixedStartAt!).getTime()),
+      ...agendaBlockedTimes.map((interval) => new Date(interval.start).getTime()),
+    ];
+    const normalizedTasks = tasks.map((task) => {
+      if (
+        !task.id ||
+        !agendaTaskIds.has(task.id) ||
+        !task.fixedStartAt ||
+        !task.fixedEndAt
+      ) {
+        return task;
+      }
+      const start = new Date(task.fixedStartAt).getTime();
+      const originalEnd = new Date(task.fixedEndAt).getTime();
+      const nextBoundary = Math.min(
+        originalEnd,
+        ...agendaBoundaries.filter((value) => value > start),
       );
+      const minutes = Math.round((nextBoundary - start) / 60_000);
+      if (minutes <= 0) return task;
+      const onward = agendaOnwardTaskIds.has(task.id);
+      const clamped = nextBoundary < originalEnd;
+      if (!onward && !clamped) return task;
+      const missingInformation = onward
+        ? task.missingInformation.filter(
+            (item) => !/confirm effort estimate/i.test(item),
+          )
+        : task.missingInformation;
+      return {
+        ...task,
+        fixedEndAt: new Date(nextBoundary).toISOString(),
+        estimatedMinutes: minutes,
+        minimumSessionMinutes: Math.min(
+          task.minimumSessionMinutes ?? minutes,
+          minutes,
+        ),
+        effortEstimateSource: onward ? "stated" as const : task.effortEstimateSource,
+        effortEstimateRationale: onward
+          ? "Used “onward” to reserve the rest of that day."
+          : "Capped the local duration estimate at the next fixed agenda entry.",
+        fieldConfidence: onward
+          ? { ...task.fieldConfidence, estimatedMinutes: 0.98 }
+          : task.fieldConfidence,
+        missingInformation,
+        reviewRequired: onward ? false : task.reviewRequired,
+        approved: onward ? true : task.approved,
+      };
     });
 
     return validateAndDedupeExtraction({
-      tasks,
+      tasks: normalizedTasks,
       ignoredStatements: ignoredStatements.slice(0, 100),
+      planningRules: agendaBlockedTimes.length
+        ? { blockedTimes: agendaBlockedTimes }
+        : undefined,
     });
   }
 }
