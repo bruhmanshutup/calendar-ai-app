@@ -54,6 +54,10 @@ export type InterpretedDate = {
   explanation?: string;
 };
 
+function ambiguousBareClock(value: string): boolean {
+  return /^(?:[1-9]|1[0-2])$/.test(value.trim());
+}
+
 function splitExplicitTime(expression: string): {
   dateExpression: string;
   timeExpression?: string;
@@ -127,6 +131,13 @@ function calendarDateResult(
       explanation: "The date is clear, but the time is ambiguous.",
     };
   }
+  if (timeExpression && ambiguousBareClock(timeExpression)) {
+    return {
+      date: resolvedDate,
+      ambiguous: true,
+      explanation: "The date is clear, but the time needs AM or PM.",
+    };
+  }
   return {
     date: resolvedDate,
     time: parsedTime,
@@ -167,6 +178,13 @@ export function resolveRelativeDate(
         explanation: "The date is clear, but the time is ambiguous.",
       };
     }
+    if (relativeDayMatch[2] && ambiguousBareClock(relativeDayMatch[2])) {
+      return {
+        date,
+        ambiguous: true,
+        explanation: "The date is clear, but the time needs AM or PM.",
+      };
+    }
     return {
       date,
       time: parsedTime,
@@ -199,6 +217,13 @@ export function resolveRelativeDate(
         date,
         ambiguous: true,
         explanation: "The date is clear, but the time is ambiguous.",
+      };
+    }
+    if (weekdayMatch[3] && ambiguousBareClock(weekdayMatch[3])) {
+      return {
+        date,
+        ambiguous: true,
+        explanation: "The date is clear, but the time needs AM or PM.",
       };
     }
     return {

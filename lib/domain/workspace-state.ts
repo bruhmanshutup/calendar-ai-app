@@ -104,7 +104,7 @@ export const persistedWorkspaceSchema = z.object({
   sessionReviews: z.array(sessionReviewSchema).max(2_000),
   planningMode: z.enum(["conservative", "balanced", "aggressive"]),
   planningRules: planningRulesSchema.optional(),
-  extractionMode: z.enum(["gemini", "openai", "local"]).optional(),
+  extractionMode: z.enum(["gemini", "openai", "local", "fast-local"]).optional(),
   replan: z.unknown().optional(),
 });
 
@@ -118,7 +118,7 @@ export type PersistedWorkspace = {
   sessionReviews: SessionReview[];
   planningMode: PlanningMode;
   planningRules?: PlanningRules;
-  extractionMode?: "gemini" | "openai" | "local";
+  extractionMode?: "gemini" | "openai" | "local" | "fast-local";
   replan?: ReplanProposal;
 };
 

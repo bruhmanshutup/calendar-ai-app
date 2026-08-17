@@ -1196,10 +1196,12 @@ function ImportView() {
               </strong>
               <p>
                 {latestReviewCount} need a quick review before scheduling. {" "}
-                {extractionMode !== "local"
+                {extractionMode === "gemini" || extractionMode === "openai"
                   ? latestLocalEstimateCount > 0
                     ? `${extractionMode === "gemini" ? "Gemini" : "OpenAI"} interpreted the list; ${latestLocalEstimateCount} ${latestLocalEstimateCount === 1 ? "item used a" : "items used"} fast local fallback estimate${latestLocalEstimateCount === 1 ? "" : "s"}.`
                     : `Effort and useful session length were estimated by ${extractionMode === "gemini" ? "Gemini" : "OpenAI"}.`
+                  : extractionMode === "fast-local"
+                    ? "A fast local interpretation avoided a network wait; uncertain estimates are highlighted."
                   : "Local estimates were used because AI is not connected."}
               </p>
             </div>

@@ -78,13 +78,13 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-Automatic mode is the default. It prefers Gemini, then OpenAI, when a corresponding server-side API key is configured and otherwise falls back to local deterministic extraction.
+Automatic mode is the default. Straightforward tasks, lists, and exact appointments use fast deterministic extraction without a network wait. Complex narratives and scheduling relationships prefer Gemini, then OpenAI, when a corresponding server-side API key is configured; unavailable providers fall back locally.
 
 ### Environment variables
 
 See `.env.example`. In particular:
 
-- `TASK_EXTRACTION_PROVIDER=auto` prefers Gemini, then OpenAI, and otherwise uses local deterministic extraction.
+- `TASK_EXTRACTION_PROVIDER=auto` keeps straightforward imports local and fast, prefers Gemini then OpenAI for complex prose, and falls back locally when no AI provider is available.
 - Set it to `mock`, `gemini`, or `openai` to force a specific provider.
 - `GEMINI_MODEL` defaults to `gemini-3.1-flash-lite`.
 - `OPENAI_MODEL` defaults to `gpt-5.6-sol`.

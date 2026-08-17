@@ -12,6 +12,7 @@ import {
 } from "@/lib/providers/structured-plan-recovery";
 import { prepareTaskExtractionInput } from "@/lib/providers/narrative-structure";
 import { recoverNarrativeSchedulingIntent } from "@/lib/providers/narrative-scheduling-recovery";
+import { shouldUseFastLocalExtraction } from "@/lib/providers/extraction-strategy";
 import {
   TaskExtractionError,
   type TaskExtractionProvider,
@@ -24,7 +25,7 @@ const requestSchema = z.object({
   sourceId: z.string().optional(),
 });
 
-type ExtractionMode = "gemini" | "openai" | "local";
+type ExtractionMode = "gemini" | "openai" | "local" | "fast-local";
 
 function provider(): { extractor: TaskExtractionProvider; mode: ExtractionMode } {
   const configured = process.env.TASK_EXTRACTION_PROVIDER ?? "auto";
@@ -60,16 +61,35 @@ export async function POST(request: Request): Promise<Response> {
   try {
     let selected = provider();
     const extractionInput = prepareTaskExtractionInput(parsed.data);
+    const localFallback = await new MockTaskExtractionProvider().extractTasks(
+      extractionInput,
+    );
     let extracted: Awaited<ReturnType<TaskExtractionProvider["extractTasks"]>>;
-    try {
-      extracted = await selected.extractor.extractTasks(extractionInput);
-    } catch (error) {
-      if (selected.mode === "local") throw error;
+    const configured = process.env.TASK_EXTRACTION_PROVIDER ?? "auto";
+    if (
+      configured === "auto" &&
+      selected.mode !== "local" &&
+      shouldUseFastLocalExtraction(extractionInput, localFallback)
+    ) {
       selected = {
         extractor: new MockTaskExtractionProvider(),
-        mode: "local",
+        mode: "fast-local",
       };
-      extracted = await selected.extractor.extractTasks(extractionInput);
+      extracted = localFallback;
+    } else {
+      try {
+        extracted =
+          selected.mode === "local"
+            ? localFallback
+            : await selected.extractor.extractTasks(extractionInput);
+      } catch (error) {
+        if (selected.mode === "local") throw error;
+        selected = {
+          extractor: new MockTaskExtractionProvider(),
+          mode: "local",
+        };
+        extracted = localFallback;
+      }
     }
     const withOverdueRecovery = await recoverExplicitOverdueTasks(
       parsed.data,

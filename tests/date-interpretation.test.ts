@@ -126,6 +126,27 @@ describe("date interpretation", () => {
     expect(ambiguous.ambiguous).toBe(true);
   });
 
+  it("requires AM or PM for a bare 1–12 clock in prose", () => {
+    const ambiguous = resolveRelativeDate(
+      "Friday at 8",
+      "2026-08-12",
+      "America/Los_Angeles",
+    );
+    expect(ambiguous).toMatchObject({
+      date: "2026-08-14",
+      ambiguous: true,
+      explanation: expect.stringContaining("AM or PM"),
+    });
+    expect(ambiguous.time).toBeUndefined();
+    expect(
+      resolveRelativeDate("Friday at 18", "2026-08-12", "America/Los_Angeles"),
+    ).toMatchObject({
+      date: "2026-08-14",
+      time: "18:00",
+      ambiguous: false,
+    });
+  });
+
   it("parses 12-hour and 24-hour clock values safely", () => {
     expect(parseClockTime("12 AM")).toBe("00:00");
     expect(parseClockTime("12:30 pm")).toBe("12:30");
