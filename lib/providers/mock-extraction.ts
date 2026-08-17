@@ -231,15 +231,70 @@ function agendaRangeMinutes(startText: string, endText: string): number | undefi
   return duration > 0 && duration <= 12 * 60 ? duration : undefined;
 }
 
+const LEADING_GERUND: Record<string, string> = {
+  applying: "apply",
+  booking: "book",
+  buying: "buy",
+  calling: "call",
+  cleaning: "clean",
+  completing: "complete",
+  drafting: "draft",
+  emailing: "email",
+  fixing: "fix",
+  paying: "pay",
+  preparing: "prepare",
+  reading: "read",
+  registering: "register",
+  renewing: "renew",
+  replying: "reply",
+  reviewing: "review",
+  scheduling: "schedule",
+  sending: "send",
+  signing: "sign",
+  studying: "study",
+  submitting: "submit",
+  updating: "update",
+  uploading: "upload",
+  writing: "write",
+};
+
+function cleanConversationalOpening(value: string): string {
+  const cleaned = value
+    .replace(/^(?:hey|hi|yo|ugh|okay|ok)[\s,!—–-]+/i, "")
+    .replace(/^(?:maybe\s+)?(?:someday\s+)?/i, "")
+    .replace(/^i[’']d\s+like\s+to\s+/i, "")
+    .replace(/^(?:would|could|do)\s+you\s+mind\s+(?:please\s+)?/i, "")
+    .replace(
+      /^(?:(?:please|kindly|pls)\s+)?(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?(?:remind me to\s+)?/i,
+      "",
+    )
+    .replace(/^(?:please|kindly|pls)\s+(?:remind me to\s+)?/i, "")
+    .replace(
+      /^i\s+(?:(?:really|probably|just)\s+)*(?:should|need|want|have|(?:would|’d|'d)\s+like)(?:(?:\s+probably)?\s+get\s+around)?\s+to\s+/i,
+      "",
+    )
+    .replace(/^i\s+(?:(?:really|probably|just)\s+)*gotta\s+/i, "")
+    .replace(/^asap\s*[—–,:-]*\s*/i, "")
+    .trim();
+  const leadingWord = /^([\p{L}]+)(\b.*)$/u.exec(cleaned);
+  const base = leadingWord
+    ? LEADING_GERUND[leadingWord[1].toLocaleLowerCase()]
+    : undefined;
+  return base && leadingWord
+    ? `${base}${leadingWord[2]}`
+    : cleaned;
+}
+
 function titleFor(text: string, datePhrase?: string): string {
-  return markdownText(text)
+  return cleanConversationalOpening(
+    markdownText(text)
     .replace(
       /^\s*(?:[-*•▪‣→☐□⬜🔲]|\d+[.)]|[ivxlcdm]+[.)]|\[[ xX]\])\s*/iu,
       "",
     )
     .replace(/^(?:task|to-?do|action item|action required|reminder)\s*:\s*/i, "")
     .replace(
-      /^(?:please|kindly|can you|could you|would you|make sure to|remember to|don't forget to)\s+/i,
+      /^(?:make sure to|remember to|don't forget to)\s+/i,
       "",
     )
     .replace(datePhrase ?? /$^/, " ")
@@ -249,9 +304,18 @@ function titleFor(text: string, datePhrase?: string): string {
       "",
     )
     .replace(/\b(?:for\s+)?\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?)(?:\s+each)?\b/gi, " ")
+    .replace(
+      /[.!?]\s*(?:(?:it|this|that)\s+)?(?:should|will|would|could|might|may|probably|roughly|likely|only)*\s*(?:take|takes|need|needs|require|requires|run)[\s.!?]*$/i,
+      "",
+    )
+    .replace(
+      /\b(?:by|before|on|due(?:\s+on)?)\s*(?=[,;:.!?—–-]*$)/i,
+      "",
+    )
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/[\s,;:.!?—–-]+$/, "");
+    .replace(/[\s,;:.!?—–-]+$/, ""),
+  );
 }
 
 function recurrenceCount(text: string): number | undefined {
@@ -320,13 +384,13 @@ function localWeekWindow(
 
 function isFixedEvent(text: string): boolean {
   if (
-    /\b(?:book|cancel|choose|confirm|request|schedule|select)\b.{0,60}\b(?:appointment|reservation)\b/i.test(
+    /\b(?:book|cancel|choose|confirm|request|reschedule|schedule|select)\b.{0,80}\b(?:appointment|breakfast|call|check-?in|dinner|event|interview|lunch|meeting|practice|presentation|reservation|review|session|sync|visit|webinar|workshop)\b/i.test(
       text,
     )
   ) {
     return false;
   }
-  return /\b(appointment|meeting|stand-?up|webinar|workshop|lecture|office hours|class|flight|reservation|interview|scheduled session)\b/i.test(
+  return /\b(appointment|breakfast|client call|conference call|dinner|flight|interview|lecture|lunch|meeting|office hours|practice|presentation|reservation|scheduled session|stand-?up|sync|town hall|visit|webinar|workshop)\b/i.test(
     text,
   );
 }
@@ -364,8 +428,13 @@ function priorityFor(
 }
 
 function hasActionVerb(text: string): boolean {
-  return /\b(?:apply|approve|attend|book|bring|build|buy|call|cancel|choose|clean|complete|confirm|create|deliver|do|draft|email|exercise|finish|fix|go|make|meet|pay|pick\s+up|practice|prepare|read|register|remember\s+to|renew|reply|request|respond|return|review|rsvp|run|schedule|select|send|sign|study|submit|take|turn\s+in|update|upload|view|waive|wash|write)\b/i.test(
-    text,
+  return (
+    /\b(?:apply|approve|attend|book|bring|build|buy|call|cancel|choose|clean|complete|confirm|create|deliver|do|draft|email|exercise|finish|fix|go|make|meet|pay|pick\s+up|practice|prepare|read|register|remember\s+to|renew|reply|request|respond|return|review|rsvp|run|schedule|select|send|sign|study|submit|take|turn\s+in|update|upload|view|waive|wash|write)\b/i.test(
+      text,
+    ) ||
+    /\b(?:need(?:s)?|want(?:s)?|should|must|have|has|gotta|plan(?:s)?|hope(?:s)?|would like|i[’']d like|get around)\b.{0,60}\b(?:applying|approving|attending|booking|bringing|building|buying|calling|cancel(?:l)?ing|choosing|cleaning|completing|confirming|creating|delivering|drafting|emailing|exercising|finishing|fixing|making|paying|practicing|preparing|reading|registering|remembering|renewing|replying|requesting|responding|returning|reviewing|running|scheduling|sending|signing|studying|submitting|taking|updating|uploading|washing|writing)\b/i.test(
+      text,
+    )
   );
 }
 
@@ -555,7 +624,7 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
     const fragments = sourceFragments(input.text);
     const lines = fragments.reduce<string[]>((items, fragment) => {
       if (
-        /^(?:(?:about|roughly|approximately)\s+\d+|(?:due|deadline|when|time|estimate|duration|effort)\s*:)/i.test(
+        /^(?:(?:about|roughly|approximately)\s+\d+|(?:due|deadline|when|time|estimate|duration|effort)\s*:|(?:(?:it|this|that)\s+)?(?:should|will|would|could|might|may|probably|roughly|likely|only)+\s*(?:take|takes|need|needs|require|requires|run)\b|(?:it|this|that)\s+(?:take|takes|need|needs|require|requires|run)\b)/i.test(
           fragment,
         ) &&
         items.length > 0

@@ -75,6 +75,43 @@ function intervalMinutes(interval: NumericInterval): number {
   return Math.max(0, Math.round((interval.end - interval.start) / MINUTE));
 }
 
+function mergeIntervals(intervals: NumericInterval[]): NumericInterval[] {
+  const ordered = intervals
+    .filter(
+      (interval) =>
+        Number.isFinite(interval.start) &&
+        Number.isFinite(interval.end) &&
+        interval.end > interval.start,
+    )
+    .sort((first, second) => first.start - second.start || first.end - second.end);
+  const merged: NumericInterval[] = [];
+  for (const interval of ordered) {
+    const previous = merged.at(-1);
+    if (!previous || interval.start > previous.end) {
+      merged.push({ ...interval });
+      continue;
+    }
+    previous.end = Math.max(previous.end, interval.end);
+  }
+  return merged;
+}
+
+function occupiedMinutesWithin(
+  boundary: NumericInterval,
+  busy: NumericInterval[],
+): number {
+  const clipped = busy
+    .map((event) => ({
+      start: Math.max(boundary.start, event.start),
+      end: Math.min(boundary.end, event.end),
+    }))
+    .filter((event) => event.end > event.start);
+  return mergeIntervals(clipped).reduce(
+    (total, interval) => total + intervalMinutes(interval),
+    0,
+  );
+}
+
 function sessionMinutes(start: string, end: string): number {
   return intervalMinutes({
     start: new Date(start).getTime(),
@@ -253,6 +290,23 @@ function clockMinutes(value: string): number {
   return hours * 60 + minutes;
 }
 
+function wakingEdgePenalty(
+  localMinutes: number,
+  durationMinutes: number,
+  wakingTime: string,
+  sleepingTime: string,
+): number {
+  const wake = clockMinutes(wakingTime);
+  let sleep = clockMinutes(sleepingTime);
+  if (sleep <= wake) sleep += 24 * 60;
+  const candidate = localMinutes < wake ? localMinutes + 24 * 60 : localMinutes;
+  const minutesSinceWake = candidate - wake;
+  const minutesUntilSleep = sleep - (candidate + durationMinutes);
+  const earlyPenalty = Math.max(0, 60 - minutesSinceWake) * 0.2;
+  const latePenalty = Math.max(0, 180 - minutesUntilSleep) * 0.35;
+  return earlyPenalty + latePenalty;
+}
+
 function isInClockWindow(
   value: number,
   window: { start: string; end: string },
@@ -336,11 +390,7 @@ function availableCapacityBefore(
       end: Math.min(interval.end, deadline),
     };
     if (clipped.end <= clipped.start) return total;
-    const occupied = busy.reduce((busyTotal, event) => {
-      const start = Math.max(clipped.start, event.start);
-      const end = Math.min(clipped.end, event.end);
-      return busyTotal + Math.max(0, Math.round((end - start) / MINUTE));
-    }, 0);
+    const occupied = occupiedMinutesWithin(clipped, busy);
     return total + Math.max(0, intervalMinutes(clipped) - occupied);
   }, 0);
 }
@@ -735,6 +785,18 @@ function candidateScore(
   if (task.taskType === "recurring_goal") {
     score -= sameTaskDayOccurrences * 70;
   }
+  const explicitTaskWindow = Boolean(
+    task.schedulingConstraints?.allowedTimeWindows?.length ||
+      task.schedulingConstraints?.preferredTimeWindows?.length,
+  );
+  if (!explicitTaskWindow) {
+    score -= wakingEdgePenalty(
+      local.minutes,
+      durationMinutes,
+      input.preferences.wakingTime,
+      input.preferences.sleepingTime,
+    );
+  }
   score += mode.densityWeight;
   return score;
 }
@@ -1065,30 +1127,23 @@ function calculateFreeMinutes(
   busy: NumericInterval[],
 ): number {
   return availability.reduce((total, interval) => {
-    const occupied = busy.reduce((busyTotal, event) => {
-      const start = Math.max(interval.start, event.start);
-      const end = Math.min(interval.end, event.end);
-      return busyTotal + Math.max(0, Math.round((end - start) / MINUTE));
-    }, 0);
+    const occupied = occupiedMinutesWithin(interval, busy);
     return total + Math.max(0, intervalMinutes(interval) - occupied);
   }, 0);
 }
 
 export function generateSchedule(input: SchedulingInput): ScheduleProposal {
-  const availability = input.availability
-    .map(toNumeric)
-    .filter((interval) => interval.end > interval.start)
-    .sort((a, b) => a.start - b.start);
-  const baseBusy = [
-    ...input.unavailableEvents,
-    ...input.blockedTimes,
-    ...input.lockedSessions.map((session) => ({
-      start: session.start,
-      end: session.end,
-    })),
-  ]
-    .map(toNumeric)
-    .sort((a, b) => a.start - b.start);
+  const availability = mergeIntervals(input.availability.map(toNumeric));
+  const baseBusy = mergeIntervals(
+    [
+      ...input.unavailableEvents,
+      ...input.blockedTimes,
+      ...input.lockedSessions.map((session) => ({
+        start: session.start,
+        end: session.end,
+      })),
+    ].map(toNumeric),
+  );
   const busy = [...baseBusy];
   const sessions: PlannedSession[] = input.lockedSessions.map((session) => ({
     id: session.id,

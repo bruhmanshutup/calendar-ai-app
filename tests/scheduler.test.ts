@@ -1189,4 +1189,56 @@ describe("deterministic scheduling", () => {
     expect(adjacent.sessions).toHaveLength(2);
     expect(adjacent.unschedulable).toHaveLength(0);
   });
+
+  it("counts overlapping availability and calendar blocks only once", () => {
+    const proposal = generateSchedule(
+      scheduling([], {
+        availability: [
+          {
+            start: "2026-07-27T08:00:00.000Z",
+            end: "2026-07-27T12:00:00.000Z",
+          },
+          {
+            start: "2026-07-27T10:00:00.000Z",
+            end: "2026-07-27T14:00:00.000Z",
+          },
+        ],
+        unavailableEvents: [
+          {
+            start: "2026-07-27T09:00:00.000Z",
+            end: "2026-07-27T11:00:00.000Z",
+          },
+          {
+            start: "2026-07-27T10:00:00.000Z",
+            end: "2026-07-27T12:00:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    // The union is 08:00–14:00 (360 minutes), with one 09:00–12:00
+    // occupied span (180 minutes), leaving 180 minutes of actual capacity.
+    expect(proposal.availableMinutes).toBe(180);
+  });
+
+  it("avoids the edges of the waking day when ordinary daytime space is open", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "ordinary-personal-task",
+          title: "Renew passport",
+          category: "personal",
+          energyDemand: "medium",
+          estimatedMinutes: 45,
+          dueDate: "2026-07-28",
+          priority: "high",
+        }),
+      ]),
+    );
+    const session = proposal.sessions[0];
+
+    expect(session).toBeDefined();
+    expect(session.start.slice(11, 16) >= "08:00").toBe(true);
+    expect(session.end.slice(11, 16) <= "20:00").toBe(true);
+  });
 });

@@ -8,7 +8,7 @@ const WORKSPACE_ID = "owner";
 const MAX_STATE_BYTES = 2_000_000;
 
 export async function GET() {
-  const db = getDb();
+  const db = await getDb();
   const [record] = await db
     .select({ stateJson: workspaceStates.stateJson })
     .from(workspaceStates)
@@ -47,7 +47,7 @@ export async function PUT(request: Request) {
   try {
     const body = JSON.parse(bodyText) as { state?: unknown };
     const state = parsePersistedWorkspace(body.state);
-    const db = getDb();
+    const db = await getDb();
     await db
       .insert(workspaceStates)
       .values({
@@ -80,7 +80,7 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE() {
-  const db = getDb();
+  const db = await getDb();
   await db.delete(workspaceStates).where(eq(workspaceStates.id, WORKSPACE_ID));
   return NextResponse.json({ cleared: true });
 }

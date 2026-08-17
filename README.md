@@ -6,7 +6,7 @@ PlanPilot turns messy responsibilities into a realistic, explainable, adjustable
 
 The local and deployed demo supports this vertical workflow:
 
-0. Clear the seeded demo workspace from any app screen to test the product from an uncluttered state. A browser refresh restores the sample data.
+0. Clear the workspace from any app screen to test the product from an uncluttered state. Workspace changes are saved to D1 and survive navigation and browser refreshes.
 1. Complete onboarding with time zone, waking boundaries, recurring availability, focus-block preferences, and an explicit planning mode.
 2. Paste unstructured text or load a TXT file.
 3. Extract flexible work, fixed events, finite recurring quotas, and ignored informational statements through a validated provider boundary.
@@ -184,7 +184,7 @@ For another platform, confirm support for Next App Router route handlers, Node-c
 
 ## Known limitations
 
-- The default demo state is in-memory and resets on a hard refresh. Supabase repository and migration boundaries are present, but the demo UI is not yet wired to a live authenticated Supabase session.
+- The demo uses one D1-backed owner workspace rather than per-user authenticated workspaces. Supabase repository and migration boundaries are present, but the UI is not yet wired to a live authenticated Supabase session.
 - OpenAI extraction is implemented but not exercised without the user’s API key; mock extraction is used in tests and the deployed demo.
 - Google Calendar provider operations are implemented, while the production OAuth callback/token refresh persistence is documented but deliberately disabled in the UI until credentials exist.
 - PDF and image extraction controls are clearly disabled. OCR is not implemented.
