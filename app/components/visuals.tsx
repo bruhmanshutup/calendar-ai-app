@@ -102,17 +102,50 @@ export function OrbitFallback({ blocks = DEMO_BLOCKS, progress = 0.5 }: { blocks
     <svg className="orbit-fallback" viewBox="0 0 220 220" aria-hidden="true">
       <defs>
         <radialGradient id="orbit-glow" cx="50%" cy="50%" r="50%">
-          <stop offset="0" stopColor="#7c3aed" stopOpacity="0.35" />
-          <stop offset="1" stopColor="#7c3aed" stopOpacity="0" />
+          <stop offset="0" stopColor="#7d72b0" stopOpacity="0.35" />
+          <stop offset="1" stopColor="#7d72b0" stopOpacity="0" />
         </radialGradient>
       </defs>
       <circle cx={cx} cy={cy} r={104} fill="url(#orbit-glow)" />
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#7c3aed" strokeWidth="3" opacity="0.8" />
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#7d72b0" strokeWidth="3" opacity="0.8" />
       {blocks.map((block) => (
         <path key={block.label} d={arc(block.start, block.width)} fill="none" strokeWidth="12" strokeLinecap="round" className={`orbit-arc orbit-arc-${block.tone}`} />
       ))}
       <circle cx={nx} cy={ny} r="7" fill="#fff" />
-      <circle cx={nx} cy={ny} r="14" fill="#f5d0fe" opacity="0.3" />
+      <circle cx={nx} cy={ny} r="14" fill="#dcd6ee" opacity="0.3" />
+    </svg>
+  );
+}
+
+/** Static clock face for phones / no-3D on the landing page. */
+export function ClockFallback() {
+  const hours = Array.from({ length: 12 }, (_, index) => index + 1);
+  const at = (value: number, radius: number) => {
+    const angle = (value / 12) * Math.PI * 2;
+    return { x: round2(110 + Math.sin(angle) * radius), y: round2(110 - Math.cos(angle) * radius) };
+  };
+  const minute = at(2, 72);
+  const hour = at(10.2, 46);
+  return (
+    <svg className="orbit-fallback clock-fallback" viewBox="0 0 220 220" aria-hidden="true">
+      <circle cx="110" cy="110" r="100" fill="#2a2836" stroke="#4a4462" strokeWidth="6" />
+      <circle cx="110" cy="110" r="90" fill="#4a4462" />
+      {hours.map((value) => {
+        const inner = at(value, value % 3 === 0 ? 76 : 80);
+        const outer = at(value, 87);
+        const label = at(value, 64);
+        return (
+          <g key={value}>
+            <line x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke="#e7dfcf" strokeWidth={value % 3 === 0 ? 3 : 1.5} strokeLinecap="round" opacity="0.8" />
+            <text x={label.x} y={label.y} fill="#e7dfcf" fontSize="12" fontWeight="600" textAnchor="middle" dominantBaseline="central" opacity="0.85">
+              {value}
+            </text>
+          </g>
+        );
+      })}
+      <line x1="110" y1="110" x2={hour.x} y2={hour.y} stroke="#d6c39a" strokeWidth="6" strokeLinecap="round" />
+      <line x1="110" y1="110" x2={minute.x} y2={minute.y} stroke="#d6c39a" strokeWidth="4" strokeLinecap="round" />
+      <circle cx="110" cy="110" r="6" fill="#d6c39a" />
     </svg>
   );
 }

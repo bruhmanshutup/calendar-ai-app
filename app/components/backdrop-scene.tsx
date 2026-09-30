@@ -56,13 +56,13 @@ function Field({ reducedMotion }: { reducedMotion: boolean }) {
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[positions, 3]} />
         </bufferGeometry>
-        <pointsMaterial color="#cfc6ff" size={0.05} sizeAttenuation transparent opacity={0.55} depthWrite={false} />
+        <pointsMaterial color="#bdb7d0" size={0.045} sizeAttenuation transparent opacity={0.4} depthWrite={false} />
       </points>
       <group ref={rings} position={[6, -3, -9]}>
         {[
-          { r: 5.5, c: "#7c3aed", o: 0.55 },
-          { r: 7.6, c: "#db2777", o: 0.35 },
-          { r: 9.8, c: "#0891b2", o: 0.25 },
+          { r: 5.5, c: "#6f6690", o: 0.4 },
+          { r: 7.6, c: "#8a6f80", o: 0.24 },
+          { r: 9.8, c: "#5f7b8c", o: 0.18 },
         ].map((ring, index) => (
           <mesh key={index} rotation={[0, 0, (index * TAU) / 7]}>
             <torusGeometry args={[ring.r, 0.035, 12, 160]} />

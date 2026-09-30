@@ -5,13 +5,13 @@ import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 /**
- * PlanOrbit — a real-time 3D "day ring".
+ * PlanOrbit — a real-time 3D "day disc" for the dashboard.
  *
- * The ring is a 24-hour clock laid flat. Session blocks are extruded arcs
- * sitting on the ring; a glowing marker shows the current time; waypoint
- * spheres float above each block. The whole group slowly rotates, tilts
- * toward the pointer, and can be dragged to spin. Built with Three.js via
- * React Three Fiber so it needs no external scene URL.
+ * A solid lacquered disc with a felt top, metal spindle, and studded rim.
+ * Today's sessions sit on the felt as raised, matte pieces around a
+ * 24-hour dial; a brass bead marks the current time. One warm key light
+ * casts soft shadows. The disc tilts toward the pointer and can be dragged
+ * to spin. Built with Three.js via React Three Fiber — no external files.
  */
 
 export type OrbitBlock = {
@@ -30,192 +30,140 @@ export type PlanOrbitSceneProps = {
   onHoverBlock?: (label: string | undefined) => void;
 };
 
+// Calm, dusty tones (the names stay the same so callers don't change).
 const TONES: Record<OrbitBlock["tone"], string> = {
-  violet: "#a78bfa",
-  coral: "#fb7185",
-  cyan: "#22d3ee",
-  amber: "#fbbf24",
+  violet: "#8f86b8",
+  coral: "#b58f96",
+  cyan: "#7f9db0",
+  amber: "#c2ad8a",
 };
 
-const RING_RADIUS = 2.15;
 const TAU = Math.PI * 2;
+const DISC_R = 2.5;
+const FELT_R = DISC_R - 0.18;
+const FELT_TOP = 0.13;
+const METAL = "#b8b3c6";
 
-function arcGeometry(start: number, width: number, inner = RING_RADIUS - 0.34, outer = RING_RADIUS + 0.34, depth = 0.28) {
+function discGeometry(radius: number) {
+  const shape = new THREE.Shape();
+  shape.absarc(0, 0, radius, 0, TAU, false);
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.14,
+    bevelEnabled: true,
+    bevelThickness: 0.04,
+    bevelSize: 0.04,
+    bevelSegments: 5,
+    curveSegments: 96,
+  });
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate(0, -0.07, 0);
+  return geometry;
+}
+
+/** A raised arc piece sitting on the felt, bottom at y = 0. */
+function arcGeometry(start: number, width: number, inner = 1.55, outer = 2.12, depth = 0.06) {
   const startAngle = start * TAU;
   const endAngle = (start + width) * TAU;
   const shape = new THREE.Shape();
   shape.absarc(0, 0, outer, startAngle, endAngle, false);
   shape.absarc(0, 0, inner, endAngle, startAngle, true);
+  const bevel = 0.02;
   const geometry = new THREE.ExtrudeGeometry(shape, {
     depth,
     bevelEnabled: true,
-    bevelThickness: 0.04,
-    bevelSize: 0.04,
-    bevelSegments: 2,
-    curveSegments: 24,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelSegments: 3,
+    curveSegments: 32,
   });
   geometry.rotateX(-Math.PI / 2);
-  geometry.translate(0, -depth / 2, 0);
+  geometry.translate(0, bevel, 0);
   return geometry;
 }
 
-function SessionBlock({
+function SessionPiece({
   block,
-  index,
-  reducedMotion,
   onHoverBlock,
 }: {
   block: OrbitBlock;
-  index: number;
-  reducedMotion: boolean;
   onHoverBlock?: (label: string | undefined) => void;
 }) {
   const geometry = useMemo(() => arcGeometry(block.start, block.width), [block.start, block.width]);
   const [hovered, setHovered] = useState(false);
   const mesh = useRef<THREE.Mesh>(null);
-  const sphere = useRef<THREE.Mesh>(null);
   const color = TONES[block.tone];
-  const midAngle = (block.start + block.width / 2) * TAU;
-  const sx = Math.cos(midAngle) * RING_RADIUS;
-  const sz = -Math.sin(midAngle) * RING_RADIUS;
 
-  useFrame(({ clock }) => {
-    const t = clock.getElapsedTime();
-    if (mesh.current) {
-      const lift = hovered ? 0.22 : 0;
-      mesh.current.position.y = THREE.MathUtils.lerp(mesh.current.position.y, lift, 0.12);
-      const material = mesh.current.material as THREE.MeshStandardMaterial;
-      material.emissiveIntensity = THREE.MathUtils.lerp(material.emissiveIntensity, hovered ? 1.3 : 0.55, 0.1);
-    }
-    if (sphere.current) {
-      const bob = reducedMotion ? 0 : Math.sin(t * 1.4 + index) * 0.08;
-      sphere.current.position.y = 0.75 + bob + (hovered ? 0.2 : 0);
-    }
+  useFrame(() => {
+    if (!mesh.current) return;
+    mesh.current.position.y = THREE.MathUtils.lerp(mesh.current.position.y, FELT_TOP + (hovered ? 0.12 : 0), 0.14);
+    const material = mesh.current.material as THREE.MeshStandardMaterial;
+    material.emissiveIntensity = THREE.MathUtils.lerp(material.emissiveIntensity, hovered ? 0.18 : 0, 0.12);
   });
 
   const over = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
     setHovered(true);
     onHoverBlock?.(block.label);
-    document.body.style.cursor = "pointer";
   };
   const out = () => {
     setHovered(false);
     onHoverBlock?.(undefined);
-    document.body.style.cursor = "";
   };
 
   return (
-    <group>
-      <mesh ref={mesh} geometry={geometry} onPointerOver={over} onPointerOut={out} castShadow>
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={0.55}
-          roughness={0.35}
-          metalness={0.15}
-          transparent
-          opacity={0.94}
-        />
-      </mesh>
-      <mesh ref={sphere} position={[sx, 0.75, sz]}>
-        <sphereGeometry args={[0.09, 24, 24]} />
-        <meshStandardMaterial color="#ffffff" emissive={color} emissiveIntensity={1.6} roughness={0.2} />
-      </mesh>
-      <mesh position={[sx, 0.4, sz]}>
-        <cylinderGeometry args={[0.008, 0.008, 0.6, 6]} />
-        <meshBasicMaterial color={color} transparent opacity={0.45} />
-      </mesh>
-    </group>
+    <mesh ref={mesh} geometry={geometry} position={[0, FELT_TOP, 0]} onPointerOver={over} onPointerOut={out} castShadow receiveShadow>
+      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0} roughness={0.55} metalness={0.05} />
+    </mesh>
   );
 }
 
-function NowMarker({ progress, reducedMotion }: { progress: number; reducedMotion: boolean }) {
-  const ref = useRef<THREE.Group>(null);
-  const glow = useRef<THREE.Mesh>(null);
+function NowMarker({ progress }: { progress: number }) {
   const angle = progress * TAU;
-  useFrame(({ clock }) => {
-    if (!glow.current || reducedMotion) return;
-    const s = 1 + Math.sin(clock.getElapsedTime() * 2.2) * 0.18;
-    glow.current.scale.setScalar(s);
-  });
   return (
-    <group ref={ref} rotation={[0, angle, 0]}>
-      <mesh position={[RING_RADIUS, 0.02, 0]}>
-        <sphereGeometry args={[0.13, 24, 24]} />
-        <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={2} />
+    <group rotation={[0, angle, 0]}>
+      <mesh position={[DISC_R - 0.09, 0.16, 0]} castShadow>
+        <sphereGeometry args={[0.07, 24, 16]} />
+        <meshStandardMaterial color="#d6c39a" metalness={0.75} roughness={0.28} emissive="#d6c39a" emissiveIntensity={0.15} />
       </mesh>
-      <mesh ref={glow} position={[RING_RADIUS, 0.02, 0]}>
-        <sphereGeometry args={[0.26, 24, 24]} />
-        <meshBasicMaterial color="#f5d0fe" transparent opacity={0.22} />
-      </mesh>
-      <mesh position={[RING_RADIUS / 2, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.01, 0.01, RING_RADIUS, 6]} />
-        <meshBasicMaterial color="#e9d5ff" transparent opacity={0.5} />
+      <mesh position={[(DISC_R - 0.09) / 2 + 0.1, FELT_TOP + 0.005, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.008, 0.008, DISC_R - 0.29, 8]} />
+        <meshStandardMaterial color="#d6c39a" metalness={0.6} roughness={0.35} transparent opacity={0.6} />
       </mesh>
     </group>
   );
 }
 
-function Ticks() {
-  const items = useMemo(() => Array.from({ length: 24 }, (_, hour) => hour), []);
+function Platter() {
+  const geometry = useMemo(() => discGeometry(DISC_R), []);
+  const hours = useMemo(() => Array.from({ length: 24 }, (_, hour) => hour), []);
   return (
     <group>
-      {items.map((hour) => {
+      <mesh geometry={geometry} castShadow receiveShadow>
+        <meshPhysicalMaterial color="#33303f" roughness={0.42} metalness={0.15} clearcoat={0.7} clearcoatRoughness={0.25} />
+      </mesh>
+      <mesh position={[0, 0.12, 0]} receiveShadow>
+        <cylinderGeometry args={[FELT_R, FELT_R, 0.02, 96]} />
+        <meshStandardMaterial color="#4a4462" roughness={0.95} />
+      </mesh>
+      {hours.map((hour) => {
         const angle = (hour / 24) * TAU;
         const major = hour % 6 === 0;
         return (
-          <mesh
-            key={hour}
-            position={[Math.cos(angle) * (RING_RADIUS + 0.55), 0, -Math.sin(angle) * (RING_RADIUS + 0.55)]}
-            rotation={[0, -angle, 0]}
-          >
-            <boxGeometry args={[major ? 0.16 : 0.08, 0.02, 0.03]} />
-            <meshBasicMaterial color={major ? "#c4b5fd" : "#6d6a8f"} transparent opacity={major ? 0.9 : 0.6} />
+          <mesh key={hour} position={[Math.cos(angle) * (DISC_R - 0.09), 0.118, -Math.sin(angle) * (DISC_R - 0.09)]} castShadow>
+            <cylinderGeometry args={[major ? 0.035 : 0.022, major ? 0.035 : 0.022, 0.018, 16]} />
+            <meshStandardMaterial color={METAL} metalness={0.85} roughness={0.3} />
           </mesh>
         );
       })}
+      <mesh position={[0, 0.2, 0]} castShadow>
+        <cylinderGeometry args={[0.055, 0.065, 0.14, 24]} />
+        <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.22} />
+      </mesh>
+      <mesh position={[0, 0.275, 0]} castShadow>
+        <sphereGeometry args={[0.055, 24, 16]} />
+        <meshStandardMaterial color={METAL} metalness={0.9} roughness={0.22} />
+      </mesh>
     </group>
-  );
-}
-
-/** Small deterministic PRNG so the particle field is identical on every render. */
-function seededRandom(seed: number) {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function Particles({ reducedMotion }: { reducedMotion: boolean }) {
-  const ref = useRef<THREE.Points>(null);
-  const positions = useMemo(() => {
-    const random = seededRandom(1337);
-    const count = 220;
-    const array = new Float32Array(count * 3);
-    for (let i = 0; i < count; i += 1) {
-      const radius = 2.6 + random() * 3.2;
-      const angle = random() * TAU;
-      array[i * 3] = Math.cos(angle) * radius;
-      array[i * 3 + 1] = (random() - 0.5) * 2.6;
-      array[i * 3 + 2] = Math.sin(angle) * radius;
-    }
-    return array;
-  }, []);
-  useFrame((_, delta) => {
-    if (ref.current && !reducedMotion) ref.current.rotation.y += delta * 0.02;
-  });
-  return (
-    <points ref={ref}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-      </bufferGeometry>
-      <pointsMaterial color="#c4b5fd" size={0.035} sizeAttenuation transparent opacity={0.55} depthWrite={false} />
-    </points>
   );
 }
 
@@ -238,19 +186,19 @@ function OrbitRig({
     if (!group.current) return;
     const pointer = state.pointer;
     if (interactive && !drag.current.active) {
-      target.current.x = -pointer.y * 0.28;
-      target.current.y = pointer.x * 0.35;
+      target.current.x = -pointer.y * 0.22;
+      target.current.y = pointer.x * 0.3;
     }
     if (!reducedMotion) {
       if (drag.current.active) {
         spin.current += drag.current.velocity;
         drag.current.velocity *= 0.85;
       } else {
-        spin.current += delta * 0.12 + drag.current.velocity;
+        spin.current += delta * 0.08 + drag.current.velocity;
         drag.current.velocity *= 0.92;
       }
     }
-    const baseTilt = 0.62;
+    const baseTilt = 0.2;
     group.current.rotation.x = THREE.MathUtils.lerp(group.current.rotation.x, baseTilt + target.current.x, 0.06);
     group.current.rotation.z = THREE.MathUtils.lerp(group.current.rotation.z, target.current.y * 0.4, 0.06);
     group.current.rotation.y = spin.current;
@@ -279,11 +227,6 @@ function OrbitRig({
       onPointerUp={onPointerUp}
       onPointerLeave={onPointerUp}
     >
-      {/* Invisible drag plane so empty space is draggable too */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]}>
-        <circleGeometry args={[3.4, 48]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-      </mesh>
       {children}
     </group>
   );
@@ -299,39 +242,42 @@ export default function PlanOrbitScene({
 }: PlanOrbitSceneProps) {
   return (
     <Canvas
+      shadows="soft"
       dpr={[1, 1.75]}
-      camera={{ position: [0, compact ? 3.4 : 3.9, compact ? 5.9 : 7.0], fov: 36 }}
+      camera={{ position: [0, compact ? 3.3 : 3.8, compact ? 5.8 : 6.8], fov: 36 }}
       gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
       frameloop={reducedMotion ? "demand" : "always"}
       style={{ position: "absolute", inset: 0, width: "100%", height: "100%", background: "transparent" }}
+      onCreated={({ camera }) => camera.lookAt(0, -0.3, 0)}
     >
-      <ambientLight intensity={0.55} />
-      <pointLight position={[4, 5, 3]} intensity={38} color="#c4b5fd" />
-      <pointLight position={[-4, 3, -3]} intensity={26} color="#fb7185" />
-      <pointLight position={[0, -3, 2]} intensity={10} color="#22d3ee" />
+      <hemisphereLight args={["#c4bfdb", "#1d1b26", 0.9]} />
+      <ambientLight intensity={0.15} />
+      <directionalLight
+        position={[3, 8, 4]}
+        intensity={2.6}
+        color="#fff3e4"
+        castShadow
+        shadow-mapSize={[1024, 1024]}
+        shadow-camera-left={-4}
+        shadow-camera-right={4}
+        shadow-camera-top={4}
+        shadow-camera-bottom={-4}
+        shadow-camera-near={1}
+        shadow-camera-far={20}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.02}
+      />
+      <directionalLight position={[-4, 2, -4]} intensity={0.5} color="#8f86b8" />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.6, 0]} receiveShadow>
+        <planeGeometry args={[20, 20]} />
+        <shadowMaterial opacity={0.3} />
+      </mesh>
       <OrbitRig reducedMotion={reducedMotion} interactive={interactive}>
-        {/* Base ring */}
-        <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[RING_RADIUS, 0.05, 16, 120]} />
-          <meshStandardMaterial color="#7c3aed" emissive="#7c3aed" emissiveIntensity={0.7} roughness={0.4} />
-        </mesh>
-        {/* Soft inner disc */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.12, 0]}>
-          <ringGeometry args={[RING_RADIUS - 0.9, RING_RADIUS + 0.9, 96]} />
-          <meshBasicMaterial color="#5b21b6" transparent opacity={0.12} side={THREE.DoubleSide} depthWrite={false} />
-        </mesh>
-        <Ticks />
+        <Platter />
         {blocks.map((block, index) => (
-          <SessionBlock
-            key={`${block.label}-${index}`}
-            block={block}
-            index={index}
-            reducedMotion={reducedMotion}
-            onHoverBlock={onHoverBlock}
-          />
+          <SessionPiece key={`${block.label}-${index}`} block={block} onHoverBlock={onHoverBlock} />
         ))}
-        <NowMarker progress={progress} reducedMotion={reducedMotion} />
-        <Particles reducedMotion={reducedMotion} />
+        <NowMarker progress={progress} />
       </OrbitRig>
     </Canvas>
   );

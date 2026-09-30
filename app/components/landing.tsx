@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowDown, ArrowRight, Check, Sparkles, Waypoints } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import packageJson from "@/package.json";
-import { OrbitFallback, useIsClient, useMediaQuery, usePrefersReducedMotion, useWebGLSupport } from "./visuals";
+import { ClockFallback, useIsClient, useMediaQuery, usePrefersReducedMotion, useWebGLSupport } from "./visuals";
 
 const PlanWorldScene = lazy(() => import("./plan-world-scene"));
 
@@ -163,7 +163,7 @@ export function LandingExperience() {
             />
           </Suspense>
         ) : (
-          <div className="world-static"><OrbitFallback progress={0.66} /></div>
+          <div className="world-static"><ClockFallback /></div>
         )}
         <div className="world-vignette" />
       </div>
