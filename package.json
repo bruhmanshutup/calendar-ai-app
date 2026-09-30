@@ -23,7 +23,9 @@
     "eval:luna-two-pass": "node --env-file=.env.local scripts/luna-two-pass-benchmark.mjs"
   },
   "dependencies": {
+    "@react-three/fiber": "^9.8.1",
     "@supabase/supabase-js": "^2.111.0",
+    "@types/three": "^0.170.0",
     "date-fns": "^4.4.0",
     "date-fns-tz": "^3.2.0",
     "drizzle-orm": "0.45.2",
@@ -32,6 +34,7 @@
     "openai": "^6.49.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
+    "three": "^0.170.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

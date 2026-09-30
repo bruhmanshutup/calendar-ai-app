@@ -102,6 +102,15 @@ import {
   extractionModeImportSummary,
   usePlanPilot,
 } from "./planpilot-provider";
+import { LandingExperience } from "./landing";
+import {
+  AppBackdrop,
+  PlanOrbit,
+  RouteIllustration,
+  SkeletonPanel,
+  WaypointDots,
+  type OrbitBlock,
+} from "./visuals";
 
 export type PlanPilotView =
   | "landing"
@@ -563,18 +572,24 @@ export function PlanHealthPanel({ compact = false }: { compact?: boolean }) {
 
 export function EmptyState({
   icon: Icon = FileText,
+  illustration,
   title,
   detail,
   action,
 }: {
   icon?: LucideIcon;
+  illustration?: "route" | "clear" | "history" | "inbox";
   title: string;
   detail: string;
   action?: ReactNode;
 }) {
   return (
     <div className="empty-state">
-      <span><Icon size={22} /></span>
+      {illustration ? (
+        <RouteIllustration variant={illustration} />
+      ) : (
+        <span><Icon size={22} /></span>
+      )}
       <h3>{title}</h3>
       <p>{detail}</p>
       {action}
@@ -617,14 +632,33 @@ export function LoadingState() {
 
 function Toast() {
   const { toast, clearToast } = usePlanPilot();
+  // Auto-dismiss after a readable delay; long messages get a little longer.
+  useEffect(() => {
+    if (!toast) return;
+    const delay = Math.min(9000, 4500 + toast.length * 25);
+    const timer = window.setTimeout(clearToast, delay);
+    return () => window.clearTimeout(timer);
+  }, [toast, clearToast]);
   if (!toast) return null;
   return (
-    <div className="toast" role="status">
-      <CheckCircle2 size={18} />
+    <div className="toast" role="status" aria-live="polite">
+      <CheckCircle2 size={18} aria-hidden="true" />
       <span>{toast}</span>
       <button onClick={clearToast} aria-label="Dismiss message">
         <X size={16} />
       </button>
+    </div>
+  );
+}
+
+const BOTTOM_NAV = APP_NAV.slice(0, 4);
+
+function AppShellSkeleton() {
+  return (
+    <div className="skeleton-page" aria-busy="true" aria-live="polite">
+      <span className="sr-only">Loading your workspace…</span>
+      <SkeletonPanel rows={2} />
+      <SkeletonPanel rows={4} />
     </div>
   );
 }
@@ -644,6 +678,15 @@ function AppShell({
     workspaceStatus,
   } = usePlanPilot();
   const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileOpen]);
+  const closeDrawer = () => setMobileOpen(false);
   const confirmClearWorkspace = () => {
     if (
       window.confirm(
@@ -655,6 +698,74 @@ function AppShell({
   };
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <AppBackdrop />
+      <nav className="app-dock" aria-label="Main navigation">
+        <Brand compact />
+        <div className="dock-links">
+          {APP_NAV.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                href={item.href}
+                key={item.href}
+                className={item.view === view ? "active" : ""}
+                aria-current={item.view === view ? "page" : undefined}
+                title={item.label}
+              >
+                <Icon size={17} aria-hidden="true" />
+                <span>{item.label === "Add responsibilities" ? "Add" : item.label}</span>
+                {item.view === "daily-review" && reviewQueue.length > 0 && <i>{reviewQueue.length}</i>}
+              </Link>
+            );
+          })}
+          <Link
+            href="/settings"
+            className={view === "settings" ? "active" : ""}
+            aria-current={view === "settings" ? "page" : undefined}
+            title="Settings"
+          >
+            <Settings size={17} aria-hidden="true" />
+            <span>Settings</span>
+          </Link>
+        </div>
+        <div className="dock-right">
+          <span className="dock-status" role="status">
+            <span className={`sync-dot ${workspaceStatus}`} aria-hidden="true" />
+            <span className="sr-only">
+              {workspaceStatus === "loading" ? "Loading workspace" : workspaceStatus === "ready" ? "Workspace saved" : "Storage unavailable"}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={toggleTheme}
+            aria-pressed={theme === "dark"}
+            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+            title={theme === "light" ? "Dark mode" : "Light mode"}
+          >
+            {theme === "light" ? <Moon size={17} aria-hidden="true" /> : <Sun size={17} aria-hidden="true" />}
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={confirmClearWorkspace}
+            aria-label="Clear workspace"
+            title="Clear workspace"
+          >
+            <Trash2 size={17} aria-hidden="true" />
+          </button>
+          <Link href="/import" className="topbar-add">
+            <Plus size={17} aria-hidden="true" />
+            Add
+          </Link>
+        </div>
+      </nav>
+      <div
+        className={`sidebar-backdrop ${mobileOpen ? "open" : ""}`}
+        aria-hidden="true"
+        onClick={() => setMobileOpen(false)}
+      />
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-top">
           <Brand compact />
@@ -674,8 +785,10 @@ function AppShell({
                 href={item.href}
                 key={item.href}
                 className={item.view === view ? "active" : ""}
+                aria-current={item.view === view ? "page" : undefined}
+                onClick={closeDrawer}
               >
-                <Icon size={18} />
+                <Icon size={18} aria-hidden="true" />
                 <span>{item.label}</span>
                 {item.view === "daily-review" && reviewQueue.length > 0 && (
                   <i>{reviewQueue.length}</i>
@@ -689,18 +802,20 @@ function AppShell({
           <Link
             href="/settings"
             className={view === "settings" ? "active" : ""}
+            aria-current={view === "settings" ? "page" : undefined}
+            onClick={closeDrawer}
           >
-            <Settings size={18} />
+            <Settings size={18} aria-hidden="true" />
             <span>Settings</span>
           </Link>
-          <button onClick={toggleTheme} className="sidebar-action">
-            {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
+          <button onClick={toggleTheme} className="sidebar-action" aria-pressed={theme === "dark"}>
+            {theme === "light" ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}
             <span>{theme === "light" ? "Dark mode" : "Light mode"}</span>
           </button>
-          <button className="sidebar-action">
-            <CircleHelp size={18} />
-            <span>Help & feedback</span>
-          </button>
+          <Link className="sidebar-action" href="/#how-it-works" onClick={closeDrawer}>
+            <CircleHelp size={18} aria-hidden="true" />
+            <span>How PlanPilot works</span>
+          </Link>
         </nav>
         <div className="profile-chip">
           <span>PP</span>
@@ -720,8 +835,8 @@ function AppShell({
           >
             <Menu size={21} />
           </button>
-          <div className="topbar-context">
-            <span className="sync-dot" />
+          <div className="topbar-context" role="status">
+            <span className={`sync-dot ${workspaceStatus}`} aria-hidden="true" />
             {workspaceStatus === "loading"
               ? "Loading workspace"
               : workspaceStatus === "ready"
@@ -736,164 +851,46 @@ function AppShell({
               onClick={confirmClearWorkspace}
               aria-label="Clear workspace"
             >
-              <Trash2 size={16} />
+              <Trash2 size={16} aria-hidden="true" />
               <span>Clear all</span>
             </button>
             <Link href="/import" className="topbar-add">
-              <Plus size={17} />
+              <Plus size={17} aria-hidden="true" />
               Add
             </Link>
           </div>
         </header>
-        <div className="app-content">{children}</div>
-      </main>
-      <Toast />
-    </div>
-  );
-}
-
-function LandingView() {
-  return (
-    <div className="landing">
-      <header className="landing-nav">
-        <Brand />
-        <nav aria-label="Landing navigation">
-          <a href="#how-it-works">How it works</a>
-          <a href="#trust">Why PlanPilot</a>
-        </nav>
-        <div>
-          <Link href="/login" className="text-link">Sign in</Link>
-          <Link href="/onboarding" className="button button-primary button-md">
-            Try the demo
-            <ArrowRight size={16} />
-          </Link>
+        <div className="app-content" id="main-content" tabIndex={-1}>
+          {workspaceStatus === "loading" ? <AppShellSkeleton /> : children}
         </div>
-      </header>
-      <main>
-        <section className="hero">
-          <div className="hero-copy">
-            <Badge tone="info">
-              <Sparkles size={13} />
-              Planning that explains itself
-            </Badge>
-            <h1>
-              Turn messy responsibilities into a plan you can <em>trust.</em>
-            </h1>
-            <p>
-              Paste an assignment sheet, checklist, or chaotic block of text.
-              PlanPilot finds the work, flags uncertainty, and builds a realistic
-              schedule around your actual time.
-            </p>
-            <div className="hero-actions">
-              <Link href="/onboarding" className="button button-primary button-lg">
-                Build my plan
-                <ArrowRight size={17} />
-              </Link>
-              <Link href="/dashboard" className="button button-secondary button-lg">
-                Explore the demo
-              </Link>
-            </div>
-            <div className="trust-row">
-              <span><Check size={14} /> No invented deadlines</span>
-              <span><Check size={14} /> Nothing exported before approval</span>
-              <span><Check size={14} /> Replans preserve your week</span>
-            </div>
-          </div>
-          <div className="hero-product" aria-label="PlanPilot product preview">
-            <div className="preview-window">
-              <div className="preview-chrome">
-                <div><i /><i /><i /></div>
-                <span>Thursday · Your proposed plan</span>
-                <Badge tone="success">Realistic</Badge>
-              </div>
-              <div className="preview-body">
-                <div className="preview-health">
-                  <div className="mini-ring"><strong>86%</strong></div>
-                  <div>
-                    <span>PLAN HEALTH</span>
-                    <h3>Most work fits comfortably.</h3>
-                    <p>Chemistry review has only 20 minutes of buffer.</p>
-                  </div>
-                </div>
-                <div className="preview-grid">
-                  <div className="preview-timeline">
-                    <span className="preview-now">4 PM</span>
-                    <article className="preview-session session-blue">
-                      <small>4:15–5:00 PM</small>
-                      <strong>Chemistry review</strong>
-                      <p><Sparkles size={12} /> Preferred focus window</p>
-                    </article>
-                    <span className="preview-now">5 PM</span>
-                    <article className="preview-session session-green">
-                      <small>5:30–6:15 PM</small>
-                      <strong>Gym session</strong>
-                      <p><Target size={12} /> Spaced from Tuesday</p>
-                    </article>
-                    <span className="preview-now">6 PM</span>
-                  </div>
-                  <div className="preview-risk">
-                    <span><AlertTriangle size={15} /> Needs attention</span>
-                    <strong>30 min won’t fit</strong>
-                    <p>Keep Saturday morning open or shorten the essay estimate.</p>
-                    <button>See options <ChevronRight size={14} /></button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="floating-note floating-note-one">
-              <span><ShieldCheck size={16} /></span>
-              <div><strong>Uncertainty preserved</strong><small>“Soon” stays unscheduled</small></div>
-            </div>
-            <div className="floating-note floating-note-two">
-              <span><RefreshCw size={16} /></span>
-              <div><strong>One change, not a reset</strong><small>Missed work moved to Wed</small></div>
-            </div>
-          </div>
-        </section>
-        <section className="principles" id="how-it-works">
-          <div className="section-intro">
-            <span className="eyebrow">FROM SOURCE TO SCHEDULE</span>
-            <h2>A calmer way to answer “what do I do next?”</h2>
-            <p>AI interprets the language. Transparent rules build the calendar.</p>
-          </div>
-          <div className="principle-grid">
-            <article>
-              <span>01</span>
-              <div className="principle-icon"><FileText size={22} /></div>
-              <h3>Bring the mess</h3>
-              <p>Paste text or upload a TXT file. Tasks and context are separated without hiding the source.</p>
-            </article>
-            <article>
-              <span>02</span>
-              <div className="principle-icon"><ShieldCheck size={22} /></div>
-              <h3>Review what’s uncertain</h3>
-              <p>Low-confidence dates, times, and effort estimates are highlighted field by field.</p>
-            </article>
-            <article>
-              <span>03</span>
-              <div className="principle-icon"><Waypoints size={22} /></div>
-              <h3>Approve a realistic plan</h3>
-              <p>Every block has a reason, buffer is protected, and overload is shown plainly.</p>
-            </article>
-          </div>
-        </section>
-        <section className="trust-section" id="trust">
-          <div>
-            <span className="eyebrow">CONTROL STAYS WITH YOU</span>
-            <h2>A planning layer, not another calendar clone.</h2>
-          </div>
-          <div className="trust-points">
-            <p><CheckCircle2 /> Fixed events and deadlines are never confused.</p>
-            <p><CheckCircle2 /> Missed sessions trigger a minimal change proposal.</p>
-            <p><CheckCircle2 /> Calendar writes happen only after explicit approval.</p>
-          </div>
-        </section>
       </main>
-      <footer className="landing-footer">
-        <Brand compact />
-        <p>Plan with reality, not wishful thinking.</p>
-        <span>© 2026 PlanPilot</span>
-      </footer>
+      <nav className="bottom-nav" aria-label="Primary navigation">
+        {BOTTOM_NAV.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Link
+              href={item.href}
+              key={item.href}
+              className={item.view === view ? "active" : ""}
+              aria-current={item.view === view ? "page" : undefined}
+            >
+              <Icon size={22} aria-hidden="true" />
+              <span>{item.label === "Add responsibilities" ? "Add" : item.label}</span>
+            </Link>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          aria-label="More navigation"
+          aria-expanded={mobileOpen}
+        >
+          <Menu size={22} aria-hidden="true" />
+          <span>More</span>
+          {reviewQueue.length > 0 && <i>{reviewQueue.length}</i>}
+        </button>
+      </nav>
+      <Toast />
     </div>
   );
 }
@@ -1053,7 +1050,12 @@ function PageHeading({
   return (
     <div className="page-heading">
       <div>
-        {eyebrow && <span className="eyebrow">{eyebrow}</span>}
+        {eyebrow && (
+          <span className="eyebrow">
+            <WaypointDots />
+            {eyebrow}
+          </span>
+        )}
         <h1>{title}</h1>
         <p>{detail}</p>
       </div>
@@ -1062,12 +1064,63 @@ function PageHeading({
   );
 }
 
+function clockMinutes(value: string): number {
+  const [hour, minute] = value.split(":").map(Number);
+  return (hour || 0) * 60 + (minute || 0);
+}
+
+const ORBIT_TONES: OrbitBlock["tone"][] = ["violet", "cyan", "coral", "amber"];
+const MINUTES_PER_DAY = 24 * 60;
+
+/** Wall-clock time read after mount (and refreshed every minute) so render stays pure. */
+function useClock(intervalMs = 60_000): number | undefined {
+  const [now, setNow] = useState<number>();
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    tick();
+    const timer = window.setInterval(tick, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
 function DashboardView() {
-  const { proposal, tasks, history } = usePlanPilot();
-  const todaySessions = proposal.sessions.filter((session) =>
-    localDateKey(new Date(session.start)) === localDateKey(),
+  const { proposal, tasks, history, sessionReviews } = usePlanPilot();
+  const now = useClock();
+  const todayKey = localDateKey();
+  const todaySessions = proposal.sessions.filter(
+    (session) => localDateKey(new Date(session.start)) === todayKey,
   );
   const shownSessions = todaySessions;
+
+  // 3D day ring: map today's sessions onto the 24-hour ring.
+  const nowMinutes = now === undefined ? clockMinutes(DEFAULT_PREFERENCES.wakingTime) : clockMinutes(localTimeKey(new Date(now)));
+  const dayProgress = Math.max(0, Math.min(1, nowMinutes / MINUTES_PER_DAY));
+  const orbitBlocks: OrbitBlock[] = todaySessions.slice(0, 8).map((session, index) => ({
+    label: `${session.title} · ${formatTime(session.start)}`,
+    start: clockMinutes(localTimeKey(session.start)) / MINUTES_PER_DAY,
+    width: Math.max(0.02, Math.min(0.3, session.minutes / MINUTES_PER_DAY)),
+    tone: ORBIT_TONES[index % ORBIT_TONES.length],
+  }));
+
+  // Real numbers for the side cards (no placeholder copy).
+  const weekAgo = (now ?? 0) - 7 * 24 * 60 * 60_000;
+  const weekReviews = sessionReviews.filter(
+    (review) =>
+      now !== undefined &&
+      new Date(review.reviewedAt).getTime() >= weekAgo &&
+      (review.outcome === "completed" || review.outcome === "partial"),
+  );
+  const completedMinutes = weekReviews.reduce((sum, review) => sum + review.completedMinutes, 0);
+  const upcomingDeadlines = tasks
+    .filter((task) => task.dueDate && !task.completed && !task.cancelled)
+    .sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""))
+    .slice(0, 4);
+  const unscheduledMinutes = proposal.planHealth.unscheduledMinutes;
+  const firstUnschedulable = proposal.unschedulable[0];
+  const bestOption = firstUnschedulable?.suggestedActions[0];
+  const todayMinutes = shownSessions.reduce((sum, session) => sum + session.minutes, 0);
+
   if (tasks.length === 0 && proposal.sessions.length === 0 && history.length === 0) {
     return (
       <>
@@ -1077,12 +1130,12 @@ function DashboardView() {
           detail="There are no imported responsibilities, proposed sessions, or history yet. Add your responsibilities to build a plan."
         />
         <EmptyState
-          icon={Sparkles}
+          illustration="route"
           title="Your workspace is clear"
           detail="Paste an assignment sheet, checklist, or email to see exactly what PlanPilot extracts and schedules."
           action={
             <Link href="/import" className="button button-primary button-md">
-              <Plus size={16} /> Add responsibilities
+              <Plus size={16} aria-hidden="true" /> Add responsibilities
             </Link>
           }
         />
@@ -1091,16 +1144,29 @@ function DashboardView() {
   }
   return (
     <>
-      <PageHeading
-        eyebrow={formatToday(true).toUpperCase()}
-        title="Your plan at a glance."
-        detail={proposal.planHealth.summary}
-        actions={
-          <Link href="/import" className="button button-primary button-md">
-            <Plus size={16} /> Add responsibilities
-          </Link>
-        }
-      />
+      <div className="dash-hero">
+        <PageHeading
+          eyebrow={formatToday(true).toUpperCase()}
+          title="Your plan at a glance."
+          detail={proposal.planHealth.summary}
+          actions={
+            <Link href="/import" className="button button-primary button-md">
+              <Plus size={16} aria-hidden="true" /> Add responsibilities
+            </Link>
+          }
+        />
+        <PlanOrbit
+          compact
+          progress={dayProgress}
+          blocks={orbitBlocks}
+          demoWhenEmpty={false}
+          caption={
+            orbitBlocks.length > 0
+              ? `${todaySessions.length} ${todaySessions.length === 1 ? "session" : "sessions"} on today's ring · drag to spin`
+              : "Today's ring is open · drag to spin"
+          }
+        />
+      </div>
       <div className="dashboard-grid">
         <div className="dashboard-main">
           <PlanHealthPanel />
@@ -1108,13 +1174,17 @@ function DashboardView() {
             <div className="panel-heading">
               <div>
                 <h2>Today’s plan</h2>
-                <p>{shownSessions.reduce((sum, session) => sum + session.minutes, 0)} focused minutes across {shownSessions.length} sessions</p>
+                <p>
+                  {shownSessions.length === 0
+                    ? "Nothing is scheduled for today."
+                    : `${todayMinutes} focused minutes across ${shownSessions.length} ${shownSessions.length === 1 ? "session" : "sessions"}`}
+                </p>
               </div>
-              <Link href="/schedule">View week <ArrowRight size={15} /></Link>
+              <Link href="/schedule">View week <ArrowRight size={15} aria-hidden="true" /></Link>
             </div>
             <div className="today-list">
               {shownSessions.length === 0 && (
-                <p className="open-day">No sessions are scheduled for today.</p>
+                <p className="open-day">No sessions are scheduled for today. Your next session appears on the schedule.</p>
               )}
               {shownSessions.map((session, index) => (
                 <article key={session.id} className="today-item">
@@ -1122,17 +1192,19 @@ function DashboardView() {
                     <strong>{formatTime(session.start)}</strong>
                     <span>{formatTime(session.end)}</span>
                   </div>
-                  <i className={index === 0 ? "blue" : index === 1 ? "green" : "amber"} />
+                  <i className={index % 3 === 0 ? "blue" : index % 3 === 1 ? "green" : "amber"} aria-hidden="true" />
                   <div className="today-detail">
                     <div>
                       <strong>{session.title}</strong>
-                      <Badge tone={session.status === "approved" ? "success" : "neutral"}>
-                        {session.status}
+                      <Badge tone={session.status === "approved" || session.status === "completed" ? "success" : "neutral"}>
+                        {session.status.replace("_", " ")}
                       </Badge>
                     </div>
                     <p>{session.explanation}</p>
                   </div>
-                  <button aria-label={`Open ${session.title}`}><ChevronRight size={18} /></button>
+                  <Link href="/schedule" aria-label={`Open ${session.title} on the schedule`}>
+                    <ChevronRight size={18} aria-hidden="true" />
+                  </Link>
                 </article>
               ))}
             </div>
@@ -1140,54 +1212,89 @@ function DashboardView() {
           <section className="panel">
             <div className="panel-heading">
               <div><h2>Upcoming deadlines</h2><p>Dates stay date-only when no time was stated.</p></div>
-              <Link href="/tasks/review">All tasks <ArrowRight size={15} /></Link>
+              <Link href="/tasks/review">All tasks <ArrowRight size={15} aria-hidden="true" /></Link>
             </div>
             <div className="deadline-list">
-              {tasks.filter((task) => task.dueDate).slice(0, 3).map((task) => (
+              {upcomingDeadlines.length === 0 && (
+                <p className="open-day">No dated deadlines yet.</p>
+              )}
+              {upcomingDeadlines.map((task) => (
                 <article key={task.id}>
-                  <div className="date-tile">
+                  <div className="date-tile" aria-hidden="true">
                     <span>{shortDate(task.dueDate).split(" ")[0]}</span>
                     <strong>{shortDate(task.dueDate).split(" ")[1]}</strong>
                   </div>
-                  <div><strong>{task.title}</strong><p>{task.estimatedMinutes} min estimated · {task.category}</p></div>
-                  <Badge tone={task.priority === "urgent" ? "danger" : "neutral"}>{task.priority}</Badge>
+                  <div>
+                    <strong>{task.title}</strong>
+                    <p>
+                      <span className="sr-only">Due {shortDate(task.dueDate)}. </span>
+                      {task.estimatedMinutes ? `${task.estimatedMinutes} min estimated` : "No estimate"} · {task.category}
+                    </p>
+                  </div>
+                  <Badge tone={task.priority === "urgent" ? "danger" : task.priority === "high" ? "warning" : "neutral"}>{task.priority}</Badge>
                 </article>
               ))}
             </div>
           </section>
         </div>
         <aside className="dashboard-side">
-          <section className="risk-panel">
-            <span className="risk-icon"><AlertTriangle size={20} /></span>
-            <Badge tone="warning">Needs a decision</Badge>
-            <h2>{proposal.planHealth.unscheduledMinutes} minutes do not fit yet</h2>
-            <p>{proposal.unschedulable[0]?.explanation ?? "An uncertain task is waiting for review."}</p>
-            <div className="risk-option">
-              <span>Best option</span>
-              <strong>Open Saturday after 1 PM</strong>
-              <small>Adds enough capacity while keeping 15% buffer.</small>
-            </div>
-            <Link href="/schedule" className="button button-secondary button-md">
-              Review options <ArrowRight size={15} />
-            </Link>
-          </section>
+          {unscheduledMinutes > 0 && firstUnschedulable ? (
+            <section className="risk-panel" aria-labelledby="risk-title">
+              <span className="risk-icon"><AlertTriangle size={20} aria-hidden="true" /></span>
+              <Badge tone="warning">Needs a decision</Badge>
+              <h2 id="risk-title">{unscheduledMinutes} minutes do not fit yet</h2>
+              <p>{firstUnschedulable.explanation}</p>
+              {bestOption && (
+                <div className="risk-option">
+                  <span>Suggested next step</span>
+                  <strong>{bestOption}</strong>
+                  <small>{firstUnschedulable.title} · {firstUnschedulable.unscheduledMinutes} min unplaced</small>
+                </div>
+              )}
+              <Link href="/schedule" className="button button-secondary button-md">
+                Review options <ArrowRight size={15} aria-hidden="true" />
+              </Link>
+            </section>
+          ) : (
+            <section className="risk-panel risk-panel-clear" aria-labelledby="risk-title">
+              <span className="risk-icon"><ShieldCheck size={20} aria-hidden="true" /></span>
+              <Badge tone="success">All clear</Badge>
+              <h2 id="risk-title">Everything fits your available time</h2>
+              <p>No work is waiting for a decision. Buffer and deadlines are respected in the current proposal.</p>
+              <Link href="/schedule" className="button button-secondary button-md">
+                Open schedule <ArrowRight size={15} aria-hidden="true" />
+              </Link>
+            </section>
+          )}
           <section className="panel side-panel">
             <div className="panel-heading">
               <div><h2>Recent changes</h2><p>Meaningful updates only</p></div>
             </div>
             <div className="mini-history">
+              {history.length === 0 && <p className="open-day">No changes recorded yet.</p>}
               {history.slice(0, 3).map((item) => (
                 <article key={item.id}>
-                  <span><PencilLine size={15} /></span>
+                  <span><PencilLine size={15} aria-hidden="true" /></span>
                   <div><strong>{item.title}</strong><p>{item.at}</p></div>
                 </article>
               ))}
             </div>
-            <Link href="/changes" className="full-link">View change history <ArrowRight size={14} /></Link>
+            <Link href="/changes" className="full-link">View change history <ArrowRight size={14} aria-hidden="true" /></Link>
           </section>
           <section className="completion-card">
-            <span><CheckCircle2 size={20} /></span>
-            <div><strong>135 min completed this week</strong><p>One gym session and two study blocks.</p></div>
+            <span><CheckCircle2 size={20} aria-hidden="true" /></span>
+            <div>
+              <strong>
+                {completedMinutes > 0
+                  ? `${completedMinutes} min completed this week`
+                  : "No outcomes recorded this week yet"}
+              </strong>
+              <p>
+                {completedMinutes > 0
+                  ? `${weekReviews.length} ${weekReviews.length === 1 ? "session" : "sessions"} reviewed in the last 7 days.`
+                  : "Completed sessions show up here after you record them in Daily review."}
+              </p>
+            </div>
           </section>
         </aside>
       </div>
@@ -1246,15 +1353,15 @@ function ImportView() {
       />
       <div className="import-layout">
         <section className="panel import-panel">
-          <div className="tab-list" role="tablist">
-            <button className={tab === "paste" ? "active" : ""} onClick={() => { setTab("paste"); setImportDocumentSource(undefined); }} role="tab">
-              <FileText size={16} /> Paste text
+          <div className="tab-list" role="tablist" aria-label="Import source">
+            <button className={tab === "paste" ? "active" : ""} onClick={() => { setTab("paste"); setImportDocumentSource(undefined); }} role="tab" aria-selected={tab === "paste"}>
+              <FileText size={16} aria-hidden="true" /> Paste text
             </button>
-            <button className={tab === "txt" ? "active" : ""} onClick={() => { setTab("txt"); setImportDocumentSource(undefined); }} role="tab">
-              <Upload size={16} /> TXT file
+            <button className={tab === "txt" ? "active" : ""} onClick={() => { setTab("txt"); setImportDocumentSource(undefined); }} role="tab" aria-selected={tab === "txt"}>
+              <Upload size={16} aria-hidden="true" /> TXT file
             </button>
-            <button className={tab === "document" ? "active" : ""} onClick={() => setTab("document")} role="tab">
-              <FileText size={16} /> PDF or image
+            <button className={tab === "document" ? "active" : ""} onClick={() => setTab("document")} role="tab" aria-selected={tab === "document"}>
+              <FileText size={16} aria-hidden="true" /> PDF or image
             </button>
           </div>
           {tab === "paste" ? (
@@ -2282,6 +2389,7 @@ function ReviewView() {
           detail="Import your own responsibilities first. PlanPilot will preserve the source text and flag uncertain fields here."
         />
         <EmptyState
+          illustration="inbox"
           title="The review queue is empty"
           detail="Add pasted text or a TXT file to test task extraction and field-level confidence."
           action={
@@ -2353,9 +2461,9 @@ function ReviewView() {
         </div>
       )}
       <div className="filter-tabs-row">
-        <div className="filter-tabs">
+        <div className="filter-tabs" role="group" aria-label="Task filter">
           {([...(latestTasks.length > 0 ? ["recent" as const] : []), "review", "ready", "all"] as const).map((item) => (
-            <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>
+            <button key={item} aria-pressed={filter === item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>
               {item === "recent"
                 ? `Just added (${latestTasks.length})`
                 : item === "review"
@@ -2965,7 +3073,7 @@ function ScheduleView() {
           detail="A proposal appears after you import and review at least one responsibility."
         />
         <EmptyState
-          icon={CalendarDays}
+          illustration="route"
           title="Your week is open"
           detail="Add responsibilities to generate a deadline-aware schedule with workload risk and planning explanations."
           action={
@@ -3015,14 +3123,14 @@ function ScheduleView() {
         </section>
       )}
       <div className="schedule-toolbar">
-        <div className="view-toggle">
-          <button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}><CalendarDays size={15} /> Timeline</button>
-          <button className={mode === "list" ? "active" : ""} onClick={() => setMode("list")}><LayoutList size={15} /> Task list</button>
+        <div className="view-toggle" role="group" aria-label="Schedule layout">
+          <button aria-pressed={mode === "week"} className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}><CalendarDays size={15} aria-hidden="true" /> Timeline</button>
+          <button aria-pressed={mode === "list"} className={mode === "list" ? "active" : ""} onClick={() => setMode("list")}><LayoutList size={15} aria-hidden="true" /> Task list</button>
         </div>
         {lastImportedTaskIds.length > 0 && (
-          <div className="view-toggle schedule-scope-toggle" aria-label="Schedule responsibility scope">
-            <button className={scope === "recent" ? "active" : ""} onClick={() => setScope("recent")}>Just added</button>
-            <button className={scope === "all" ? "active" : ""} onClick={() => setScope("all")}>All responsibilities</button>
+          <div className="view-toggle schedule-scope-toggle" role="group" aria-label="Schedule responsibility scope">
+            <button aria-pressed={scope === "recent"} className={scope === "recent" ? "active" : ""} onClick={() => setScope("recent")}>Just added</button>
+            <button aria-pressed={scope === "all"} className={scope === "all" ? "active" : ""} onClick={() => setScope("all")}>All responsibilities</button>
           </div>
         )}
         <button
@@ -3492,7 +3600,7 @@ function DailyReviewView() {
         />
         {replan ? <ChangeDiff /> : (
           <EmptyState
-            icon={CheckCircle2}
+            illustration="clear"
             title="Daily review is clear"
             detail="Future and unapproved sessions stay out of this queue. An approved session becomes actionable at its start time and remains here until you record an outcome."
             action={
@@ -3551,11 +3659,11 @@ function DailyReviewView() {
             </div>
           </div>
           <p className="daily-question">{nextCheckIn.phase === "in_progress" ? "How is this session going?" : "How did this session go?"}</p>
-          <div className="outcome-grid">
-            <button className={selectedOutcome === "completed" ? "selected success" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("completed"); }}><CheckCircle2 size={20} /><strong>{nextCheckIn.phase === "in_progress" ? "Finish early" : "Completed"}</strong><span>All planned work done</span></button>
-            <button className={selectedOutcome === "partial" ? "selected" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("partial"); setMinutes(selectedMinutes); }}><PanelLeft size={20} /><strong>Partially completed</strong><span>Some effort remains</span></button>
-            <button disabled={nextCheckIn.phase === "in_progress"} className={selectedOutcome === "missed" ? "selected warning" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("missed"); }}><RotateCcw size={20} /><strong>Missed</strong><span>{nextCheckIn.phase === "in_progress" ? "Available after session end" : "Move the work forward"}</span></button>
-            <button className={selectedOutcome === "unnecessary" ? "selected" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("unnecessary"); }}><X size={20} /><strong>No longer needed</strong><span>Remove remaining work</span></button>
+          <div className="outcome-grid" role="group" aria-label="Session outcome">
+            <button aria-pressed={selectedOutcome === "completed"} className={selectedOutcome === "completed" ? "selected success" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("completed"); }}><CheckCircle2 size={20} aria-hidden="true" /><strong>{nextCheckIn.phase === "in_progress" ? "Finish early" : "Completed"}</strong><span>All planned work done</span></button>
+            <button aria-pressed={selectedOutcome === "partial"} className={selectedOutcome === "partial" ? "selected" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("partial"); setMinutes(selectedMinutes); }}><PanelLeft size={20} aria-hidden="true" /><strong>Partially completed</strong><span>Some effort remains</span></button>
+            <button aria-pressed={selectedOutcome === "missed"} disabled={nextCheckIn.phase === "in_progress"} className={selectedOutcome === "missed" ? "selected warning" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("missed"); }}><RotateCcw size={20} aria-hidden="true" /><strong>Missed</strong><span>{nextCheckIn.phase === "in_progress" ? "Available after session end" : "Move the work forward"}</span></button>
+            <button aria-pressed={selectedOutcome === "unnecessary"} className={selectedOutcome === "unnecessary" ? "selected" : ""} onClick={() => { setActiveSessionId(next.id); setOutcome("unnecessary"); }}><X size={20} aria-hidden="true" /><strong>No longer needed</strong><span>Remove remaining work</span></button>
           </div>
           {selectedOutcome === "partial" && (
             <div className="partial-input">
@@ -3604,7 +3712,7 @@ function ChangesView() {
           detail="Task edits, approvals, schedule moves, outcomes, and calendar exports will appear here."
         />
         <EmptyState
-          icon={History}
+          illustration="history"
           title="History is empty"
           detail="Use the app normally and PlanPilot will record only changes that affect your plan."
         />
@@ -3731,7 +3839,7 @@ export default function PlanPilotApp({ view }: { view: PlanPilotView }) {
     window.history.replaceState(window.history.state, "", url);
   }, []);
 
-  if (view === "landing") return <LandingView />;
+  if (view === "landing") return <LandingExperience />;
   if (view === "login") return <LoginView />;
   if (view === "onboarding") return <OnboardingView />;
   const content =

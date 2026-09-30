@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { addDays, format, parseISO } from "date-fns";
@@ -75,6 +76,35 @@ import type { DocumentReference } from "@/lib/domain/document-import";
 import { attachDocumentSource } from "@/lib/domain/document-import";
 
 type ImportState = "idle" | "loading" | "success" | "error";
+
+// Theme preference lives in the browser (not the workspace) so it survives
+// navigation and refreshes without touching the data model.
+type Theme = "light" | "dark";
+const THEME_STORAGE_KEY = "planpilot-theme";
+const themeListeners = new Set<() => void>();
+// Dark is the default look; light is an explicit choice.
+function readTheme(): Theme {
+  try {
+    return window.localStorage.getItem(THEME_STORAGE_KEY) === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+}
+function subscribeTheme(listener: () => void) {
+  themeListeners.add(listener);
+  return () => {
+    themeListeners.delete(listener);
+  };
+}
+function writeTheme(next: Theme) {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, next);
+  } catch {
+    // Storage may be unavailable (private mode); the class still applies for this page.
+  }
+  document.documentElement.classList.toggle("dark", next === "dark");
+  themeListeners.forEach((listener) => listener());
+}
 type WorkspaceStatus = "loading" | "ready" | "error";
 
 type PlanPilotContextValue = {
@@ -392,7 +422,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
   const [scheduleUndoStack, setScheduleUndoStack] = useState<
     PlanningUndoSnapshot[]
   >([]);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const theme = useSyncExternalStore(subscribeTheme, readTheme, () => "dark" as Theme);
   const [toast, setToast] = useState<string>();
   const [workspaceStatus, setWorkspaceStatus] =
     useState<WorkspaceStatus>("loading");
@@ -1526,11 +1556,11 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
   );
 
   const toggleTheme = useCallback(() => {
-    setTheme((current) => {
-      const next = current === "light" ? "dark" : "light";
-      document.documentElement.classList.toggle("dark", next === "dark");
-      return next;
-    });
+    writeTheme(readTheme() === "light" ? "dark" : "light");
+  }, []);
+  useEffect(() => {
+    // Keep the <html> class in sync with the stored preference on first load.
+    document.documentElement.classList.toggle("dark", readTheme() === "dark");
   }, []);
 
   const clearWorkspace = useCallback(() => {
