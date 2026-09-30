@@ -28,3 +28,15 @@ const EXPLANATIONS: Record<ScheduleReasonCode, string> = {
 export function explainReasons(reasons: ScheduleReasonCode[]): string {
   return reasons.map((reason) => EXPLANATIONS[reason]).join(" ");
 }
+
+const STOCK_EXPLANATIONS = Object.values(EXPLANATIONS);
+
+/**
+ * Removes the stock one-line reasons (already shown as short tags) and keeps
+ * only notes that are specific to this session. Returns "" when nothing is left.
+ */
+export function specificExplanation(explanation: string): string {
+  let rest = explanation;
+  for (const sentence of STOCK_EXPLANATIONS) rest = rest.split(sentence).join(" ");
+  return rest.replace(/\s+/g, " ").trim();
+}

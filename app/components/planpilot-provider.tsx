@@ -54,6 +54,7 @@ import {
   type SessionCheckIn,
 } from "@/lib/domain/session-review";
 import {
+  migrateWorkspaceTimeZone,
   parsePersistedWorkspace,
   type ExtractionMode,
 } from "@/lib/domain/workspace-state";
@@ -452,7 +453,10 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
         const body = (await response.json()) as { state?: unknown };
         if (!response.ok) throw new Error("Workspace could not be loaded.");
         if (active && body.state) {
-          const saved = parsePersistedWorkspace(body.state);
+          const saved = migrateWorkspaceTimeZone(
+            parsePersistedWorkspace(body.state),
+            DEFAULT_PREFERENCES.timeZone,
+          );
           setTasks(saved.tasks);
           setPlanningRules(saved.planningRules ?? {});
           const preservedSessions = saved.proposal.sessions.filter(
@@ -501,6 +505,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       const body = JSON.stringify({
         state: {
           version: 1,
+          timeZone: DEFAULT_PREFERENCES.timeZone,
           schedulerVersion: CURRENT_SCHEDULER_VERSION,
           tasks,
           proposal,

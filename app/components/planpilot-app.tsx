@@ -10,6 +10,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   CircleHelp,
@@ -55,6 +56,7 @@ import {
   type ReactNode,
 } from "react";
 import packageJson from "@/package.json";
+import { specificExplanation } from "@/lib/domain/explanations";
 import { DEFAULT_PREFERENCES } from "@/lib/defaults";
 import { extractionFallbackNotice } from "@/lib/domain/extraction-diagnostics";
 import {
@@ -140,7 +142,12 @@ const APP_NAV: Array<{
     icon: CheckCircle2,
     view: "daily-review",
   },
+];
+
+/** Less-used pages, tucked behind the "⋯" button so the main tabs stay short. */
+const MORE_NAV: typeof APP_NAV = [
   { href: "/changes", label: "Changes", icon: History, view: "changes" },
+  { href: "/settings", label: "Settings", icon: Settings, view: "settings" },
 ];
 
 const REASON_LABELS: Record<ScheduleReasonCode, string> = {
@@ -166,7 +173,7 @@ const REASON_LABELS: Record<ScheduleReasonCode, string> = {
 
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: DEFAULT_PREFERENCES.timeZone,
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
@@ -174,7 +181,7 @@ function formatTime(value: string): string {
 
 function formatDay(value: string, long = false): string {
   return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: DEFAULT_PREFERENCES.timeZone,
     weekday: long ? "long" : "short",
     month: long ? "long" : "short",
     day: "numeric",
@@ -183,7 +190,7 @@ function formatDay(value: string, long = false): string {
 
 function formatToday(long = false): string {
   return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: DEFAULT_PREFERENCES.timeZone,
     weekday: long ? "long" : "short",
     month: long ? "long" : "short",
     day: "numeric",
@@ -192,7 +199,7 @@ function formatToday(long = false): string {
 
 function localDateKey(value = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: DEFAULT_PREFERENCES.timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -200,6 +207,17 @@ function localDateKey(value = new Date()): string {
   const get = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function timeZoneName(): string {
+  return (
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: DEFAULT_PREFERENCES.timeZone,
+      timeZoneName: "longGeneric",
+    })
+      .formatToParts(new Date())
+      .find((part) => part.type === "timeZoneName")?.value ?? DEFAULT_PREFERENCES.timeZone
+  );
 }
 
 function localTimeKey(value: string | Date): string {
@@ -518,8 +536,8 @@ export function PlanHealthPanel({ compact = false }: { compact?: boolean }) {
             <ShieldCheck size={15} aria-hidden="true" />
             Plan health
           </span>
-          <h2>{health.scheduledPercent}% of estimated work fits</h2>
-          <p>{health.summary}</p>
+          <h2>{health.scheduledPercent === 100 ? "Everything fits" : `${health.scheduledPercent}% of your work fits`}</h2>
+          {health.scheduledPercent < 100 && <p>{health.summary}</p>}
         </div>
         <div
           className="health-ring"
@@ -540,7 +558,7 @@ export function PlanHealthPanel({ compact = false }: { compact?: boolean }) {
             <Clock3 size={16} />
           </span>
           <p>Buffer retained</p>
-          <strong>{Math.round(health.bufferMinutesRetained / 60)}h {health.bufferMinutesRetained % 60}m</strong>
+          <strong>{Math.floor(health.bufferMinutesRetained / 60)}h {health.bufferMinutesRetained % 60}m</strong>
         </div>
         <div>
           <span className="metric-icon metric-icon-amber">
@@ -653,6 +671,62 @@ function Toast() {
 
 const BOTTOM_NAV = APP_NAV.slice(0, 4);
 
+function DockMoreMenu({ view }: { view: PlanPilotView }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", closeOutside);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOutside);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+  const activeItem = MORE_NAV.find((item) => item.view === view);
+  return (
+    <div className="dock-more" ref={menuRef}>
+      <button
+        type="button"
+        className={`dock-more-button ${activeItem ? "active" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={activeItem ? `More pages, ${activeItem.label} open` : "More pages"}
+        title="Changes and settings"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <MoreHorizontal size={18} aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="dock-more-menu" role="menu">
+          {MORE_NAV.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                role="menuitem"
+                href={item.href}
+                key={item.href}
+                className={item.view === view ? "active" : ""}
+                aria-current={item.view === view ? "page" : undefined}
+                onClick={() => setOpen(false)}
+              >
+                <Icon size={16} aria-hidden="true" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AppShellSkeleton() {
   return (
     <div className="skeleton-page" aria-busy="true" aria-live="polite">
@@ -719,15 +793,7 @@ function AppShell({
               </Link>
             );
           })}
-          <Link
-            href="/settings"
-            className={view === "settings" ? "active" : ""}
-            aria-current={view === "settings" ? "page" : undefined}
-            title="Settings"
-          >
-            <Settings size={17} aria-hidden="true" />
-            <span>Settings</span>
-          </Link>
+          <DockMoreMenu view={view} />
         </div>
         <div className="dock-right">
           <span className="dock-status" role="status">
@@ -799,15 +865,21 @@ function AppShell({
         </nav>
         <div className="sidebar-spacer" />
         <nav aria-label="Secondary navigation">
-          <Link
-            href="/settings"
-            className={view === "settings" ? "active" : ""}
-            aria-current={view === "settings" ? "page" : undefined}
-            onClick={closeDrawer}
-          >
-            <Settings size={18} aria-hidden="true" />
-            <span>Settings</span>
-          </Link>
+          {MORE_NAV.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                href={item.href}
+                key={item.href}
+                className={item.view === view ? "active" : ""}
+                aria-current={item.view === view ? "page" : undefined}
+                onClick={closeDrawer}
+              >
+                <Icon size={18} aria-hidden="true" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
           <button onClick={toggleTheme} className="sidebar-action" aria-pressed={theme === "dark"}>
             {theme === "light" ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}
             <span>{theme === "light" ? "Dark mode" : "Light mode"}</span>
@@ -959,7 +1031,8 @@ function OnboardingView() {
               <label>Name<input defaultValue="Alex Morgan" /></label>
               <label>
                 IANA time zone
-                <select defaultValue="America/Los_Angeles">
+                <select defaultValue={DEFAULT_PREFERENCES.timeZone}>
+                  <option>America/Chicago</option>
                   <option>America/Los_Angeles</option>
                   <option>America/New_York</option>
                   <option>Europe/London</option>
@@ -1044,7 +1117,7 @@ function PageHeading({
 }: {
   eyebrow?: string;
   title: string;
-  detail: string;
+  detail?: string;
   actions?: ReactNode;
 }) {
   return (
@@ -1057,7 +1130,7 @@ function PageHeading({
           </span>
         )}
         <h1>{title}</h1>
-        <p>{detail}</p>
+        {detail && <p>{detail}</p>}
       </div>
       {actions && <div className="page-actions">{actions}</div>}
     </div>
@@ -1121,6 +1194,54 @@ function DashboardView() {
   const bestOption = firstUnschedulable?.suggestedActions[0];
   const todayMinutes = shownSessions.reduce((sum, session) => sum + session.minutes, 0);
 
+  // Split today's sessions at the current moment. Until the clock is known
+  // (first render), everything counts as upcoming.
+  const orderedToday = [...shownSessions].sort(
+    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
+  );
+  const isPast = (session: PlannedSession) =>
+    now !== undefined && new Date(session.end).getTime() <= now;
+  const isNow = (session: PlannedSession) =>
+    now !== undefined &&
+    new Date(session.start).getTime() <= now &&
+    now < new Date(session.end).getTime();
+  const upcomingToday = orderedToday.filter((session) => !isPast(session));
+  const pastToday = orderedToday.filter(isPast);
+  const minutesLeft = upcomingToday.reduce((sum, session) => {
+    if (!isNow(session) || now === undefined) return sum + session.minutes;
+    return sum + Math.max(0, Math.round((new Date(session.end).getTime() - now) / 60_000));
+  }, 0);
+  const renderTodaySession = (session: PlannedSession) => {
+    const index = orderedToday.indexOf(session);
+    const past = isPast(session);
+    const current = isNow(session);
+    const note = specificExplanation(session.explanation);
+    return (
+      <article key={session.id} className={`today-item ${past ? "is-past" : ""} ${current ? "is-now" : ""}`}>
+        <div className="today-time">
+          <strong>{formatTime(session.start)}</strong>
+          <span>{formatTime(session.end)}</span>
+        </div>
+        <i className={index % 3 === 0 ? "blue" : index % 3 === 1 ? "green" : "amber"} aria-hidden="true" />
+        <div className="today-detail">
+          <div>
+            <strong>{session.title}</strong>
+            {current && <Badge tone="info">Now</Badge>}
+            {session.status !== "approved" && (
+              <Badge tone={session.status === "completed" ? "success" : "neutral"}>
+                {session.status.replace("_", " ")}
+              </Badge>
+            )}
+          </div>
+          {note && <p>{note}</p>}
+        </div>
+        <Link href="/schedule" aria-label={`Open ${session.title} on the schedule`}>
+          <ChevronRight size={18} aria-hidden="true" />
+        </Link>
+      </article>
+    );
+  };
+
   if (tasks.length === 0 && proposal.sessions.length === 0 && history.length === 0) {
     return (
       <>
@@ -1148,7 +1269,6 @@ function DashboardView() {
         <PageHeading
           eyebrow={formatToday(true).toUpperCase()}
           title="Your plan at a glance."
-          detail={proposal.planHealth.summary}
           actions={
             <Link href="/import" className="button button-primary button-md">
               <Plus size={16} aria-hidden="true" /> Add responsibilities
@@ -1162,8 +1282,8 @@ function DashboardView() {
           demoWhenEmpty={false}
           caption={
             orbitBlocks.length > 0
-              ? `${todaySessions.length} ${todaySessions.length === 1 ? "session" : "sessions"} on today's ring · drag to spin`
-              : "Today's ring is open · drag to spin"
+              ? `${todaySessions.length} ${todaySessions.length === 1 ? "session" : "sessions"} today · drag to spin`
+              : "Nothing today · drag to spin"
           }
         />
       </div>
@@ -1177,41 +1297,44 @@ function DashboardView() {
                 <p>
                   {shownSessions.length === 0
                     ? "Nothing is scheduled for today."
-                    : `${todayMinutes} focused minutes across ${shownSessions.length} ${shownSessions.length === 1 ? "session" : "sessions"}`}
+                    : upcomingToday.length === 0
+                      ? `All done · ${todayMinutes} min`
+                      : `${minutesLeft} min left · ${upcomingToday.length} upcoming`}
                 </p>
               </div>
               <Link href="/schedule">View week <ArrowRight size={15} aria-hidden="true" /></Link>
             </div>
             <div className="today-list">
               {shownSessions.length === 0 && (
-                <p className="open-day">No sessions are scheduled for today. Your next session appears on the schedule.</p>
+                <p className="open-day">Nothing scheduled today.</p>
               )}
-              {shownSessions.map((session, index) => (
-                <article key={session.id} className="today-item">
-                  <div className="today-time">
-                    <strong>{formatTime(session.start)}</strong>
-                    <span>{formatTime(session.end)}</span>
-                  </div>
-                  <i className={index % 3 === 0 ? "blue" : index % 3 === 1 ? "green" : "amber"} aria-hidden="true" />
-                  <div className="today-detail">
-                    <div>
-                      <strong>{session.title}</strong>
-                      <Badge tone={session.status === "approved" || session.status === "completed" ? "success" : "neutral"}>
-                        {session.status.replace("_", " ")}
-                      </Badge>
-                    </div>
-                    <p>{session.explanation}</p>
-                  </div>
-                  <Link href="/schedule" aria-label={`Open ${session.title} on the schedule`}>
-                    <ChevronRight size={18} aria-hidden="true" />
-                  </Link>
-                </article>
-              ))}
+              {shownSessions.length > 0 && (
+                <>
+                  <h3 className="today-group-label">
+                    <span>Upcoming</span>
+                    <span>{upcomingToday.length}</span>
+                  </h3>
+                  {upcomingToday.length === 0 ? (
+                    <p className="open-day today-group-empty">Nothing left for today.</p>
+                  ) : (
+                    upcomingToday.map(renderTodaySession)
+                  )}
+                </>
+              )}
+              {pastToday.length > 0 && (
+                <>
+                  <h3 className="today-group-label">
+                    <span>Past</span>
+                    <span>{pastToday.length}</span>
+                  </h3>
+                  {pastToday.map(renderTodaySession)}
+                </>
+              )}
             </div>
           </section>
           <section className="panel">
             <div className="panel-heading">
-              <div><h2>Upcoming deadlines</h2><p>Dates stay date-only when no time was stated.</p></div>
+              <div><h2>Upcoming deadlines</h2></div>
               <Link href="/tasks/review">All tasks <ArrowRight size={15} aria-hidden="true" /></Link>
             </div>
             <div className="deadline-list">
@@ -1259,8 +1382,7 @@ function DashboardView() {
             <section className="risk-panel risk-panel-clear" aria-labelledby="risk-title">
               <span className="risk-icon"><ShieldCheck size={20} aria-hidden="true" /></span>
               <Badge tone="success">All clear</Badge>
-              <h2 id="risk-title">Everything fits your available time</h2>
-              <p>No work is waiting for a decision. Buffer and deadlines are respected in the current proposal.</p>
+              <h2 id="risk-title">Nothing needs a decision</h2>
               <Link href="/schedule" className="button button-secondary button-md">
                 Open schedule <ArrowRight size={15} aria-hidden="true" />
               </Link>
@@ -1268,7 +1390,7 @@ function DashboardView() {
           )}
           <section className="panel side-panel">
             <div className="panel-heading">
-              <div><h2>Recent changes</h2><p>Meaningful updates only</p></div>
+              <div><h2>Recent changes</h2></div>
             </div>
             <div className="mini-history">
               {history.length === 0 && <p className="open-day">No changes recorded yet.</p>}
@@ -1287,12 +1409,12 @@ function DashboardView() {
               <strong>
                 {completedMinutes > 0
                   ? `${completedMinutes} min completed this week`
-                  : "No outcomes recorded this week yet"}
+                  : "Nothing recorded this week"}
               </strong>
               <p>
                 {completedMinutes > 0
                   ? `${weekReviews.length} ${weekReviews.length === 1 ? "session" : "sessions"} reviewed in the last 7 days.`
-                  : "Completed sessions show up here after you record them in Daily review."}
+                  : "Mark sessions done in Daily review."}
               </p>
             </div>
           </section>
@@ -2561,9 +2683,18 @@ export function ScheduleSessionCard({
   const canMove = manuallyMovable;
   const statusLabel = session.status.replace("_", " ");
   const isOverdue = session.reasonCodes.includes("OVERDUE_RECOVERY");
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = reasonExpanded ?? localExpanded;
+  const toggleExpanded = () => {
+    if (onReasonExpandedChange) onReasonExpandedChange(!expanded);
+    else setLocalExpanded(!expanded);
+  };
+  const note = specificExplanation(session.explanation);
+  const needsTimingCheck =
+    !!task?.schedulingConstraints?.calculatedTiming && task.reviewRequired && session.status === "proposed";
   return (
     <article
-      className={`schedule-session ${session.status === "approved" ? "session-approved" : ""} ${isOverdue ? "session-overdue" : ""}`}
+      className={`schedule-session ${session.status === "approved" ? "session-approved" : ""} ${session.status === "proposed" ? "session-proposed" : ""} ${isOverdue ? "session-overdue" : ""} ${expanded ? "is-expanded" : ""}`}
       data-manually-draggable={canMove ? "true" : "false"}
       onPointerDown={canMove ? onSessionPointerDown : undefined}
       onPointerMove={canMove ? onSessionPointerMove : undefined}
@@ -2572,9 +2703,9 @@ export function ScheduleSessionCard({
       onLostPointerCapture={
         canMove ? onSessionLostPointerCapture : undefined
       }
-      aria-label={`${session.title}, ${formatTime(session.start)} to ${formatTime(session.end)}${session.locked ? ", locked" : ""}`}
+      aria-label={`${session.title}, ${formatTime(session.start)} to ${formatTime(session.end)}, ${statusLabel}${session.locked ? ", locked" : ""}`}
     >
-      <div className="session-top">
+      <div className="session-row">
         {selectable && session.status === "proposed" && (
           <label className="session-select">
             <input
@@ -2585,74 +2716,107 @@ export function ScheduleSessionCard({
             />
           </label>
         )}
-        <div className="session-time">
-          <strong>{formatTime(session.start)}–{formatTime(session.end)}</strong>
-          <span>{session.minutes} min</span>
+        <div className="session-main">
+          <span className="session-when">{formatTime(session.start)}–{formatTime(session.end)}</span>
+          <h3>{session.title}</h3>
         </div>
-        {isOverdue && (
-          <span
-            className="session-overdue-badge"
-            title="This work is scheduled after its stated deadline"
+        {session.status === "proposed" ? (
+          <button
+            type="button"
+            className="session-quick-approve"
+            onClick={() => approveSession(session.id)}
+            aria-label={`Approve ${session.title}`}
+            title="Approve"
           >
-            <AlertTriangle size={11} aria-hidden="true" />
-            Overdue
+            <Check size={14} aria-hidden="true" />
+          </button>
+        ) : (
+          <span className={`session-status session-status-${session.status}`} title={statusLabel}>
+            {session.status === "approved" || session.status === "completed" ? (
+              <CheckCircle2 size={14} aria-hidden="true" />
+            ) : (
+              <small>{statusLabel}</small>
+            )}
           </span>
         )}
         <button
-          className="icon-button"
-          onClick={() => toggleSessionLock(session.id)}
-          aria-label={
-            session.locked
-              ? "Allow automatic schedule changes"
-              : "Protect from automatic schedule changes"
-          }
+          type="button"
+          className="session-expand"
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "Hide" : "Show"} details for ${session.title}`}
+          onClick={toggleExpanded}
         >
-          {session.locked ? <Lock size={15} /> : <LockOpen size={15} />}
+          {expanded ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
         </button>
       </div>
-      <h3>{session.title}</h3>
-      {task?.schedulingConstraints?.calculatedTiming && task.reviewRequired && session.status === "proposed" && (
-        <Badge tone="warning">Calculated · check timing</Badge>
+      {(isOverdue || needsTimingCheck) && (
+        <div className="session-flags">
+          {isOverdue && (
+            <span className="session-overdue-badge" title="Scheduled after its deadline">
+              <AlertTriangle size={11} aria-hidden="true" />
+              Overdue
+            </span>
+          )}
+          {needsTimingCheck && <Badge tone="warning">Calculated · check timing</Badge>}
+        </div>
       )}
-      <ScheduleReason
-        reasons={session.reasonCodes}
-        explanation={session.explanation}
-        expanded={reasonExpanded}
-        onExpandedChange={onReasonExpandedChange}
-      />
-      <div className="session-actions">
-        {session.status === "proposed" ? (
-          <button onClick={() => approveSession(session.id)}><Check size={13} /> Approve</button>
-        ) : <Badge tone={session.status === "approved" || session.status === "completed" ? "success" : "neutral"}><Check size={12} /> {statusLabel}</Badge>}
-        {onMove && manuallyMovable && <button onClick={() => onMove(session)} disabled={!canMove}><MoveRight size={13} /> Move</button>}
-        {manuallyMovable && <button onClick={() => requestAnotherTime(session.id)} disabled={session.locked}><RotateCcw size={13} /> Next opening</button>}
-        {actionable && <button onClick={() => rejectSession(session.id)}><X size={13} /> Reject</button>}
-      </div>
+      {expanded && (
+        <div className="session-details">
+          <div className="reason-tags" aria-label="Why this time">
+            <span className="reason-tags-label">Why</span>
+            {session.reasonCodes.slice(0, 3).map((reason) => (
+              <span key={reason}>{REASON_LABELS[reason as ScheduleReasonCode] ?? reason}</span>
+            ))}
+            <span className="reason-minutes">{session.minutes} min</span>
+          </div>
+          {note && <p className="session-note">{note}</p>}
+          <div className="session-actions">
+            {session.status === "proposed" && (
+              <button type="button" onClick={() => approveSession(session.id)}><Check size={13} aria-hidden="true" /> Approve</button>
+            )}
+            {onMove && manuallyMovable && <button type="button" onClick={() => onMove(session)} disabled={!canMove}><MoveRight size={13} aria-hidden="true" /> Move</button>}
+            {manuallyMovable && <button type="button" onClick={() => requestAnotherTime(session.id)} disabled={session.locked}><RotateCcw size={13} aria-hidden="true" /> Next opening</button>}
+            {actionable && <button type="button" onClick={() => rejectSession(session.id)}><X size={13} aria-hidden="true" /> Reject</button>}
+            <button
+              type="button"
+              className="session-lock"
+              onClick={() => toggleSessionLock(session.id)}
+              aria-pressed={session.locked}
+              title={session.locked ? "Protected from automatic changes" : "Automatic changes allowed"}
+            >
+              {session.locked ? <Lock size={13} aria-hidden="true" /> : <LockOpen size={13} aria-hidden="true" />}
+              {session.locked ? "Locked" : "Lock"}
+            </button>
+          </div>
+        </div>
+      )}
     </article>
   );
 }
 
-function scheduleColumns(sessions: PlannedSession[]) {
-  const base = new Date(`${localDateKey()}T12:00:00Z`);
-  const latest = sessions.reduce((value, session) => {
-    const date = new Date(`${localDateKey(new Date(session.start))}T12:00:00Z`);
-    return date > value ? date : value;
-  }, base);
-  const visibleDays = Math.min(
-    35,
-    Math.max(5, Math.round((latest.getTime() - base.getTime()) / (24 * 60 * 60_000)) + 1),
-  );
-  return Array.from({ length: visibleDays }, (_, offset) => {
-    const date = new Date(base);
-    date.setUTCDate(base.getUTCDate() + offset);
-    const key = date.toISOString().slice(0, 10);
+/** The seven days (Sunday through Saturday) of the week `offset` weeks from this one. */
+function weekColumnsFor(offset: number) {
+  const today = new Date(`${localDateKey()}T12:00:00Z`);
+  const sunday = new Date(today);
+  sunday.setUTCDate(today.getUTCDate() - today.getUTCDay() + offset * 7);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(sunday);
+    date.setUTCDate(sunday.getUTCDate() + index);
     return {
-      date: key,
+      date: date.toISOString().slice(0, 10),
       label: new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(date),
       day: new Intl.DateTimeFormat("en-US", { day: "numeric", timeZone: "UTC" }).format(date),
       range: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(date),
+      year: date.getUTCFullYear(),
     };
   });
+}
+
+function weekRangeLabel(columns: ReturnType<typeof weekColumnsFor>): string {
+  const first = columns[0];
+  const last = columns[columns.length - 1];
+  const sameMonth = first.range.split(" ")[0] === last.range.split(" ")[0];
+  return `${first.range} – ${sameMonth ? last.day : last.range}, ${last.year}`;
 }
 
 type ManualPlacementDraft = {
@@ -2682,6 +2846,7 @@ function ScheduleView() {
   } = usePlanPilot();
   const [mode, setMode] = useState<"week" | "list">("week");
   const [scope, setScope] = useState<"recent" | "all">("all");
+  const [weekOffset, setWeekOffset] = useState(0);
   const [expandedReasonIds, setExpandedReasonIds] = useState<string[]>([]);
   const [draggingSessionId, setDraggingSessionId] = useState<string>();
   const [dragTargetDate, setDragTargetDate] = useState<string>();
@@ -2709,13 +2874,24 @@ function ScheduleView() {
     && (scope === "all" || latestTaskIds.has(task.id ?? "")),
   );
   const arrivalBuffers = arrivalBufferReservations(tasks, true);
-  const weekColumns = scheduleColumns(visibleSessions);
+  const weekColumns = weekColumnsFor(weekOffset);
+  const weekFirstDate = weekColumns[0].date;
+  const weekLastDate = weekColumns[weekColumns.length - 1].date;
+  const sessionsByDate = new Map<string, PlannedSession[]>();
+  for (const session of [...visibleSessions].sort(
+    (left, right) => new Date(left.start).getTime() - new Date(right.start).getTime(),
+  )) {
+    const key = localDateKey(new Date(session.start));
+    if (key < weekFirstDate || key > weekLastDate) continue;
+    sessionsByDate.set(key, [...(sessionsByDate.get(key) ?? []), session]);
+  }
+  const weekSessions = weekColumns.flatMap((day) => sessionsByDate.get(day.date) ?? []);
   const allReasonsExpanded =
-    visibleSessions.length > 0 &&
-    visibleSessions.every((session) => expandedReasonIds.includes(session.id));
+    weekSessions.length > 0 &&
+    weekSessions.every((session) => expandedReasonIds.includes(session.id));
   const toggleAllReasons = () => {
     setExpandedReasonIds(
-      allReasonsExpanded ? [] : visibleSessions.map((session) => session.id),
+      allReasonsExpanded ? [] : weekSessions.map((session) => session.id),
     );
   };
   const setReasonExpanded = (sessionId: string, expanded: boolean) => {
@@ -3088,12 +3264,12 @@ function ScheduleView() {
   return (
     <>
       <PageHeading
-        eyebrow="PROPOSED SCHEDULE · VERSION 3"
-        title="A realistic plan for the weeks ahead."
+        eyebrow="SCHEDULE"
+        title="Your week"
         detail={
           scope === "recent"
-            ? "Showing the latest import. Earlier commitments still protect their time without cluttering this view."
-            : "Drag a flexible session to any visible day, verify the exact time, and PlanPilot will protect your choice while replanning flexible work."
+            ? "Showing only what you just added."
+            : "Drag a flexible session to another day to move it."
         }
         actions={
           <>
@@ -3107,7 +3283,7 @@ function ScheduleView() {
       <PlanHealthPanel compact />
       {visibleCheckpoints.length > 0 && (
         <section className="panel" aria-label="Arrival and dependency checkpoints">
-          <div className="panel-heading"><div><h2>Arrival &amp; dependency checkpoints</h2><p>Point-in-time targets, not work blocks. Pending interpretations do not constrain the schedule until you confirm them.</p></div></div>
+          <div className="panel-heading"><div><h2>Checkpoints</h2><p>Arrive-by and ready-by times.</p></div></div>
           <div className="unschedulable-list">
             {visibleCheckpoints.map((task) => (
               <div className="source-quote" key={task.id}>
@@ -3123,6 +3299,20 @@ function ScheduleView() {
         </section>
       )}
       <div className="schedule-toolbar">
+        <div className="week-nav" role="group" aria-label="Choose week">
+          <button type="button" className="icon-button" onClick={() => setWeekOffset((value) => value - 1)} aria-label="Previous week" title="Previous week">
+            <ChevronLeft size={18} aria-hidden="true" />
+          </button>
+          <button type="button" className="icon-button" onClick={() => setWeekOffset((value) => value + 1)} aria-label="Next week" title="Next week">
+            <ChevronRight size={18} aria-hidden="true" />
+          </button>
+          <h2 className="week-nav-range" aria-live="polite">{weekRangeLabel(weekColumns)}</h2>
+          {weekOffset !== 0 && (
+            <button type="button" className="week-nav-today" onClick={() => setWeekOffset(0)}>
+              This week
+            </button>
+          )}
+        </div>
         <div className="view-toggle" role="group" aria-label="Schedule layout">
           <button aria-pressed={mode === "week"} className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}><CalendarDays size={15} aria-hidden="true" /> Timeline</button>
           <button aria-pressed={mode === "list"} className={mode === "list" ? "active" : ""} onClick={() => setMode("list")}><LayoutList size={15} aria-hidden="true" /> Task list</button>
@@ -3137,10 +3327,10 @@ function ScheduleView() {
           type="button"
           className="reasoning-all-button"
           onClick={toggleAllReasons}
-          aria-label={`${allReasonsExpanded ? "Collapse" : "Expand"} all scheduling reasoning and explanations`}
+          aria-label={`${allReasonsExpanded ? "Hide" : "Show"} details for every session this week`}
         >
           {allReasonsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {allReasonsExpanded ? "Collapse all" : "Expand all"}
+          {allReasonsExpanded ? "Hide details" : "Show details"}
         </button>
         <Button
           variant="secondary"
@@ -3156,23 +3346,11 @@ function ScheduleView() {
         >
           <Undo2 size={14} /> Undo
         </Button>
-        <span className="schedule-range">{weekColumns[0].range} – {weekColumns.at(-1)?.range}</span>
       </div>
       {mode === "week" ? (
-        <div
-          className="week-board"
-          style={{ gridTemplateColumns: `repeat(${weekColumns.length}, minmax(180px, 1fr))` }}
-        >
+        <div className="week-board">
           {weekColumns.map((day) => {
-            const sessions = visibleSessions.filter(
-              (session) =>
-                new Intl.DateTimeFormat("en-CA", {
-                  timeZone: "America/Los_Angeles",
-                  year: "numeric",
-                  month: "2-digit",
-                  day: "2-digit",
-                }).format(new Date(session.start)) === day.date,
-            );
+            const sessions = sessionsByDate.get(day.date) ?? [];
             return (
               <div
                 className={`week-column ${draggingSessionId ? "drag-ready" : ""} ${dragTargetDate === day.date ? "drag-target" : ""}`}
@@ -3183,7 +3361,7 @@ function ScheduleView() {
                   <span>{day.label}</span><strong>{day.day}</strong>
                   {day.date === localDateKey() && <small>Today</small>}
                 </header>
-                <div className="day-capacity"><i style={{ width: `${Math.min(100, sessions.length * 24)}%` }} /><span>{sessions.reduce((sum, session) => sum + session.minutes, 0)}m planned</span></div>
+                <div className="day-capacity"><i style={{ width: `${Math.min(100, sessions.length * 24)}%` }} /><span>{sessions.length > 0 ? `${sessions.reduce((sum, session) => sum + session.minutes, 0)} min` : "Free"}</span></div>
                 <div className="day-sessions">
                   {sessions.map((session) => (
                     <div key={session.id}>
@@ -3204,12 +3382,10 @@ function ScheduleView() {
                       />
                     </div>
                   ))}
-                  {sessions.length === 0 && !draggingSessionId && <span className="open-day">Open capacity</span>}
                   {draggingSessionId && (
                     <div className="day-drop-prompt" aria-hidden="true">
                       <MoveRight size={16} />
-                      <strong>Place on {day.label} {day.day}</strong>
-                      <span>Drop, then verify the exact time</span>
+                      <strong>{day.label} {day.day}</strong>
                     </div>
                   )}
                 </div>
@@ -3219,9 +3395,12 @@ function ScheduleView() {
         </div>
       ) : (
         <div className="schedule-list-view">
-          {visibleSessions.map((session) => (
+          {weekSessions.length === 0 && <p className="open-day">Nothing scheduled this week.</p>}
+          {weekSessions.map((session, index) => (
             <div key={session.id}>
-              <span className="list-day">{formatDay(session.start, true)}</span>
+              {(index === 0 || localDateKey(new Date(weekSessions[index - 1].start)) !== localDateKey(new Date(session.start))) && (
+                <span className="list-day">{formatDay(session.start, true)}</span>
+              )}
               <ScheduleSessionCard
                 session={session}
                 onMove={openPlacement}
@@ -3283,8 +3462,7 @@ function ScheduleView() {
                       type="date"
                       autoFocus
                       value={placementDraft.date}
-                      min={weekColumns[0]?.date}
-                      max={weekColumns.at(-1)?.date}
+                      min={localDateKey()}
                       onChange={(event) =>
                         setPlacementDraft((current) =>
                           current
@@ -3316,7 +3494,7 @@ function ScheduleView() {
                         ? `${formatDay(placementStartAt, true)} · ${formatTime(placementStartAt)}–${formatTime(placementEndAt)}`
                         : "Choose a valid date and time"}
                     </strong>
-                    <small>{placementSession.minutes} minutes · Pacific time</small>
+                    <small>{placementSession.minutes} minutes · {timeZoneName()}</small>
                   </div>
                 </div>
                 {placementError && (
@@ -3476,29 +3654,25 @@ function ScheduleView() {
           </section>
         </div>
       )}
-      <div className="schedule-bottom-grid">
-        <section className="panel">
-          <div className="panel-heading"><div><h2>Work that does not fit yet</h2><p>No tasks are quietly squeezed into invalid time.</p></div></div>
-          <div className="unschedulable-list">
-            {visibleUnschedulable.map((task) => <UnschedulableTaskCard task={task} responsibility={tasks.find((item) => item.id === task.taskId)} key={task.taskId} />)}
-            {visibleUnschedulable.length === 0 && (
-              <p className="open-day">Everything in this view fits.</p>
-            )}
-          </div>
-        </section>
+      <div className={`schedule-bottom-grid ${visibleUnschedulable.length === 0 ? "is-single" : ""}`}>
+        {visibleUnschedulable.length > 0 && (
+          <section className="panel">
+            <div className="panel-heading"><div><h2>Doesn’t fit yet</h2></div></div>
+            <div className="unschedulable-list">
+              {visibleUnschedulable.map((task) => <UnschedulableTaskCard task={task} responsibility={tasks.find((item) => item.id === task.taskId)} key={task.taskId} />)}
+            </div>
+          </section>
+        )}
         <section className="export-panel">
           <span><CalendarDays size={21} /></span>
           <div>
-            <Badge tone="info">Google Calendar</Badge>
-            <h2>Export your approved schedule</h2>
-            <p>Download all approved sessions in your plan as a calendar file (.ics), including sessions outside this view.</p>
+            <h2>Export to Google Calendar</h2>
+            <p>{proposal.sessions.filter((session) => session.status === "approved").length} approved sessions, all weeks. One-time download, no live sync.</p>
             <Button onClick={exportApprovedSessions} disabled={exportState === "loading" || !proposal.sessions.some((session) => session.status === "approved")}>
               {exportState === "loading" ? <RefreshCw className="spin" size={16} /> : <Download size={16} />}
-              {exportState === "loading" ? "Preparing calendar…" : "Export to Google Calendar"}
+              {exportState === "loading" ? "Preparing…" : "Download calendar file"}
             </Button>
-            <p>{proposal.sessions.filter((session) => session.status === "approved").length} approved sessions ready. Approve sessions above to include them.</p>
-            <p>On a computer, open Google Calendar → Settings → Import &amp; export. Select the downloaded file, choose your calendar, then click Import. <a href="https://support.google.com/calendar/answer/37118" target="_blank" rel="noreferrer">Import help</a></p>
-            <p>This is a one-time export. Later schedule changes do not sync automatically.</p>
+            <p>Then in Google Calendar: Settings → Import &amp; export. <a href="https://support.google.com/calendar/answer/37118" target="_blank" rel="noreferrer">Help</a></p>
           </div>
         </section>
       </div>
@@ -3622,11 +3796,11 @@ function DailyReviewView() {
 
   const startDate = new Date(next.start);
   const weekday = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: DEFAULT_PREFERENCES.timeZone,
     weekday: "short",
   }).format(startDate).toUpperCase();
   const day = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: DEFAULT_PREFERENCES.timeZone,
     day: "numeric",
   }).format(startDate);
   const progress = reviewTotal > 0 ? (reviewedToday / reviewTotal) * 100 : 0;

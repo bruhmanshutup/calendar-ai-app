@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { extractedTaskSchema, planningRulesSchema } from "./extraction-schema";
 import { materializeCalculatedTimeBlock } from "./calculated-time-block";
 import { withTaskClassification } from "./task-classification";
@@ -113,6 +114,7 @@ const sessionReviewSchema = z.object({
 
 export const persistedWorkspaceSchema = z.object({
   version: z.literal(1),
+  timeZone: z.string().optional(),
   schedulerVersion: z.number().int().positive().optional(),
   tasks: z.array(extractedTaskSchema).max(250),
   proposal: scheduleProposalSchema,
@@ -127,6 +129,8 @@ export const persistedWorkspaceSchema = z.object({
 
 export type PersistedWorkspace = {
   version: 1;
+  /** Time zone the saved plan times were calculated in. Missing means the original Pacific default. */
+  timeZone?: string;
   schedulerVersion?: number;
   tasks: z.infer<typeof extractedTaskSchema>[];
   proposal: ScheduleProposal;
@@ -142,4 +146,62 @@ export type PersistedWorkspace = {
 export function parsePersistedWorkspace(value: unknown): PersistedWorkspace {
   const state = persistedWorkspaceSchema.parse(value) as PersistedWorkspace;
   return { ...state, tasks: state.tasks.map((task) => withTaskClassification(materializeCalculatedTimeBlock(task))) };
+}
+
+/** Time zone that workspaces saved before the timeZone field existed were planned in. */
+export const LEGACY_WORKSPACE_TIME_ZONE = "America/Los_Angeles";
+
+// Planned (future-facing) times. These keep their wall-clock time when the
+// time zone changes. Moments that really happened (reviewedAt, completedAt,
+// cancelledAt, history) are deliberately left alone.
+const PLANNED_TIME_KEYS = new Set([
+  "start",
+  "end",
+  "reviewAfter",
+  "scheduledStart",
+  "scheduledEnd",
+  "dueAt",
+  "fixedStartAt",
+  "fixedEndAt",
+  "windowStart",
+  "windowEnd",
+]);
+const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+function shiftWallClock(value: string, from: string, to: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const wallClock = formatInTimeZone(date, from, "yyyy-MM-dd'T'HH:mm:ss.SSS");
+  return fromZonedTime(wallClock, to).toISOString();
+}
+
+function shiftPlannedTimes(value: unknown, from: string, to: string): unknown {
+  if (Array.isArray(value)) return value.map((item) => shiftPlannedTimes(item, from, to));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+      key,
+      typeof item === "string" && PLANNED_TIME_KEYS.has(key) && INSTANT_PATTERN.test(item)
+        ? shiftWallClock(item, from, to)
+        : shiftPlannedTimes(item, from, to),
+    ]),
+  );
+}
+
+/**
+ * Moves a saved workspace to a new time zone so every planned session, break,
+ * deadline, and blocked time keeps the same clock time (10:00 AM stays 10:00 AM).
+ */
+export function migrateWorkspaceTimeZone(state: PersistedWorkspace, timeZone: string): PersistedWorkspace {
+  const from = state.timeZone ?? LEGACY_WORKSPACE_TIME_ZONE;
+  if (from === timeZone) return { ...state, timeZone };
+  return {
+    ...state,
+    timeZone,
+    tasks: shiftPlannedTimes(state.tasks, from, timeZone) as PersistedWorkspace["tasks"],
+    proposal: shiftPlannedTimes(state.proposal, from, timeZone) as ScheduleProposal,
+    sessionReviews: shiftPlannedTimes(state.sessionReviews, from, timeZone) as SessionReview[],
+    planningRules: shiftPlannedTimes(state.planningRules, from, timeZone) as PlanningRules | undefined,
+    replan: shiftPlannedTimes(state.replan, from, timeZone) as ReplanProposal | undefined,
+  };
 }

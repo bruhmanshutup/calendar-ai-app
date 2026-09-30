@@ -11,6 +11,13 @@ import { finalizeStagedExtraction } from "../lib/providers/staged-extraction";
 import { generateSchedule } from "../lib/domain/scheduler";
 import { TEST_PREFERENCES } from "./fixtures";
 
+// These fixtures are written in Pacific time, so render the app's clock labels in Pacific too.
+vi.mock("../lib/defaults", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../lib/defaults")>();
+  return { ...original, DEFAULT_PREFERENCES: { ...original.DEFAULT_PREFERENCES, timeZone: "America/Los_Angeles" } };
+});
+
+
 vi.mock("../app/components/planpilot-provider", () => ({
   usePlanPilot: () => ({ updateTask: vi.fn(), approveTask: vi.fn(), deleteTask: vi.fn() }),
 }));

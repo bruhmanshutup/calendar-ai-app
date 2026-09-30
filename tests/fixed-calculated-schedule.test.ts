@@ -13,6 +13,13 @@ import { ScheduleSessionCard, TaskReviewCard } from "../app/components/planpilot
 import type { ExtractedTask } from "../lib/domain/types";
 import { TEST_PREFERENCES } from "./fixtures";
 
+// These fixtures are written in Pacific time, so render the app's clock labels in Pacific too.
+vi.mock("../lib/defaults", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../lib/defaults")>();
+  return { ...original, DEFAULT_PREFERENCES: { ...original.DEFAULT_PREFERENCES, timeZone: "America/Los_Angeles" } };
+});
+
+
 const mocked = vi.hoisted(() => ({ tasks: [] as ExtractedTask[] }));
 vi.mock("../app/components/planpilot-provider", () => ({ usePlanPilot: () => ({ tasks: mocked.tasks, selectedSessionIds: [], updateTask: vi.fn(), approveTask: vi.fn(), deleteTask: vi.fn() }) }));
 const timeZone = "America/Los_Angeles";

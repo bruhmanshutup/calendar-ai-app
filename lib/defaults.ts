@@ -1,7 +1,7 @@
 import type { SchedulingPreferences } from "@/lib/domain/types";
 
 export const DEFAULT_PREFERENCES: SchedulingPreferences = {
-  timeZone: "America/Los_Angeles",
+  timeZone: "America/Chicago",
   wakingTime: "07:00",
   sleepingTime: "23:00",
   preferredBlockMinutes: 45,

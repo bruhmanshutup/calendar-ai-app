@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { useMemo, useRef, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import * as THREE from "three";
 
 /**
@@ -104,21 +104,168 @@ export type PlanWorldProps = {
   reducedMotion: boolean;
   interactive: boolean;
   onReady?: () => void;
+  /** Called the first time the visitor drags the view. */
+  onFirstDrag?: () => void;
 };
 
-function CameraRig({ progressRef, interactive, reducedMotion }: PlanWorldProps) {
-  const scratch = useRef({ pos: new THREE.Vector3(), look: new THREE.Vector3(), currentLook: new THREE.Vector3(0, 0, 0) });
+/** How far the visitor has orbited the view away from the scripted camera path. */
+type Orbit = {
+  yaw: number;
+  pitch: number;
+  vYaw: number;
+  vPitch: number;
+  dragging: boolean;
+  resetting: boolean;
+  lastX: number;
+  lastY: number;
+  dragged: boolean;
+};
+
+const MIN_PHI = 0.08; // almost straight down from above
+const MAX_PHI = 1.9; // a little below the clock, looking up
+
+/** Click-and-drag anywhere on the scene to orbit; double-click to reset. */
+function OrbitInput({
+  orbitRef,
+  interactive,
+  onFirstDrag,
+}: {
+  orbitRef: MutableRefObject<Orbit>;
+  interactive: boolean;
+  onFirstDrag?: () => void;
+}) {
+  const element = useThree((state) => state.gl.domElement);
+  useEffect(() => {
+    if (!interactive) return;
+    const orbit = orbitRef.current;
+    const down = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      // Dragging the scene should never select page text.
+      event.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      orbit.dragging = true;
+      orbit.resetting = false;
+      orbit.lastX = event.clientX;
+      orbit.lastY = event.clientY;
+      orbit.vYaw = 0;
+      orbit.vPitch = 0;
+      element.setPointerCapture(event.pointerId);
+      element.classList.add("is-dragging");
+    };
+    const move = (event: PointerEvent) => {
+      if (!orbit.dragging) return;
+      const width = element.clientWidth || 1;
+      const dx = event.clientX - orbit.lastX;
+      const dy = event.clientY - orbit.lastY;
+      orbit.lastX = event.clientX;
+      orbit.lastY = event.clientY;
+      orbit.vYaw = -(dx / width) * Math.PI * 1.3;
+      orbit.vPitch = (dy / width) * Math.PI * 1.3;
+      orbit.yaw += orbit.vYaw;
+      orbit.pitch += orbit.vPitch;
+      if (!orbit.dragged && Math.abs(dx) + Math.abs(dy) > 2) {
+        orbit.dragged = true;
+        onFirstDrag?.();
+      }
+    };
+    const up = (event: PointerEvent) => {
+      if (!orbit.dragging) return;
+      orbit.dragging = false;
+      if (element.hasPointerCapture(event.pointerId)) element.releasePointerCapture(event.pointerId);
+      element.classList.remove("is-dragging");
+    };
+    const reset = () => {
+      orbit.resetting = true;
+      orbit.vYaw = 0;
+      orbit.vPitch = 0;
+    };
+    element.addEventListener("pointerdown", down);
+    element.addEventListener("pointermove", move);
+    element.addEventListener("pointerup", up);
+    element.addEventListener("pointercancel", up);
+    element.addEventListener("dblclick", reset);
+    return () => {
+      element.removeEventListener("pointerdown", down);
+      element.removeEventListener("pointermove", move);
+      element.removeEventListener("pointerup", up);
+      element.removeEventListener("pointercancel", up);
+      element.removeEventListener("dblclick", reset);
+    };
+  }, [element, interactive, orbitRef, onFirstDrag]);
+  return null;
+}
+
+function CameraRig({
+  progressRef,
+  interactive,
+  reducedMotion,
+  orbitRef,
+}: PlanWorldProps & { orbitRef: MutableRefObject<Orbit> }) {
+  const scratch = useRef({
+    pos: new THREE.Vector3(),
+    look: new THREE.Vector3(),
+    currentLook: new THREE.Vector3(0, 0, 0),
+    offset: new THREE.Vector3(),
+    right: new THREE.Vector3(),
+    pivot: new THREE.Vector3(),
+    spherical: new THREE.Spherical(),
+    yawTurn: new THREE.Quaternion(),
+    pitchTurn: new THREE.Quaternion(),
+    turn: new THREE.Quaternion(),
+    up: new THREE.Vector3(0, 1, 0),
+  });
   useFrame((state, delta) => {
-    const { pos, look, currentLook } = scratch.current;
+    const { pos, look, currentLook, offset, right, pivot, spherical, yawTurn, pitchTurn, turn, up } = scratch.current;
+    const orbit = orbitRef.current;
     sampleCamera(progressRef.current, pos, look);
-    if (interactive) {
-      pos.x += state.pointer.x * 0.6;
-      pos.y += state.pointer.y * 0.35;
+
+    // Let the view drift after a drag, or glide home after a double-click.
+    if (!orbit.dragging) {
+      if (!reducedMotion) {
+        orbit.yaw += orbit.vYaw;
+        orbit.pitch += orbit.vPitch;
+      }
+      orbit.vYaw *= 0.92;
+      orbit.vPitch *= 0.92;
+      if (orbit.resetting) {
+        const ease = Math.min(1, delta * 4);
+        orbit.yaw -= orbit.yaw * ease;
+        orbit.pitch -= orbit.pitch * ease;
+        if (Math.abs(orbit.yaw) < 0.001 && Math.abs(orbit.pitch) < 0.001) {
+          orbit.yaw = 0;
+          orbit.pitch = 0;
+          orbit.resetting = false;
+        }
+      }
     }
-    const k = reducedMotion ? 1 : 1 - Math.exp(-delta * 5);
+
+    // Orbit around the center of the scene (the clock), turning the look
+    // target with the camera so the clock keeps its place in the frame.
+    // The whole camera rig turns rigidly: first around the upright axis
+    // (yaw), then tilts around the horizontal axis (pitch).
+    pivot.set(0, look.y, 0);
+    offset.copy(pos).sub(pivot);
+    spherical.setFromVector3(offset);
+    orbit.pitch = THREE.MathUtils.clamp(orbit.pitch, spherical.phi - MAX_PHI, spherical.phi - MIN_PHI);
+    yawTurn.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, orbit.yaw);
+    offset.applyQuaternion(yawTurn);
+    right.crossVectors(offset, THREE.Object3D.DEFAULT_UP).normalize();
+    pitchTurn.setFromAxisAngle(right, orbit.pitch);
+    turn.multiplyQuaternions(pitchTurn, yawTurn);
+    pos.sub(pivot).applyQuaternion(turn).add(pivot);
+    look.sub(pivot).applyQuaternion(turn).add(pivot);
+    // Tilt the camera's "up" with the rig so the clock stays anchored in frame.
+    up.copy(THREE.Object3D.DEFAULT_UP).applyQuaternion(turn);
+
+    if (interactive && !orbit.dragging) {
+      pos.x += state.pointer.x * 0.35;
+      pos.y += state.pointer.y * 0.2;
+    }
+    const k = reducedMotion ? 1 : 1 - Math.exp(-delta * (orbit.dragging ? 14 : 5));
     const cam = state.camera;
     cam.position.lerp(pos, k);
     currentLook.lerp(look, k);
+    cam.up.lerp(up, k).normalize();
     cam.lookAt(currentLook);
   });
   return null;
@@ -784,35 +931,9 @@ function Stars({ reducedMotion }: { reducedMotion: boolean }) {
 }
 
 function World(props: PlanWorldProps) {
-  const { reducedMotion, interactive } = props;
-  const group = useRef<THREE.Group>(null);
-  const drag = useRef({ active: false, lastX: 0, velocity: 0, spin: 0 });
-  const { size } = useThree();
-  useFrame((_, delta) => {
-    if (!group.current) return;
-    const d = drag.current;
-    d.spin += d.velocity;
-    d.velocity *= d.active ? 0.85 : 0.9;
-    if (!d.active) d.spin += (0 - d.spin) * Math.min(1, delta * 1.6);
-    group.current.rotation.y = d.spin;
-  });
-  const onPointerDown = (event: ThreeEvent<PointerEvent>) => {
-    if (!interactive) return;
-    drag.current.active = true;
-    drag.current.lastX = event.clientX;
-    (event.target as Element).setPointerCapture?.(event.pointerId);
-  };
-  const onPointerMove = (event: ThreeEvent<PointerEvent>) => {
-    if (!drag.current.active) return;
-    const dx = event.clientX - drag.current.lastX;
-    drag.current.lastX = event.clientX;
-    drag.current.velocity = (dx / size.width) * 2.2;
-  };
-  const onPointerUp = () => {
-    drag.current.active = false;
-  };
+  const { reducedMotion } = props;
   return (
-    <group ref={group} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}>
+    <group>
       <Platter studs={false} />
       <ClockFace />
       <ClockHands progressRef={props.progressRef} reducedMotion={reducedMotion} />
@@ -823,6 +944,17 @@ function World(props: PlanWorldProps) {
 }
 
 export default function PlanWorldScene(props: PlanWorldProps) {
+  const orbitRef = useRef<Orbit>({
+    yaw: 0,
+    pitch: 0,
+    vYaw: 0,
+    vPitch: 0,
+    dragging: false,
+    resetting: false,
+    lastX: 0,
+    lastY: 0,
+    dragged: false,
+  });
   return (
     <Canvas
       shadows="soft"
@@ -857,7 +989,8 @@ export default function PlanWorldScene(props: PlanWorldProps) {
         <planeGeometry args={[60, 60]} />
         <shadowMaterial opacity={0.35} />
       </mesh>
-      <CameraRig {...props} />
+      <OrbitInput orbitRef={orbitRef} interactive={props.interactive} onFirstDrag={props.onFirstDrag} />
+      <CameraRig {...props} orbitRef={orbitRef} />
       <Stars reducedMotion={props.reducedMotion} />
       <World {...props} />
     </Canvas>

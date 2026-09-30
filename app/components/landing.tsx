@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ArrowDown, ArrowRight, Check, Sparkles, Waypoints } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import packageJson from "@/package.json";
 import { ClockFallback, useIsClient, useMediaQuery, usePrefersReducedMotion, useWebGLSupport } from "./visuals";
 
@@ -55,9 +55,14 @@ function GlowCursor() {
       targetY = event.clientY;
       element.classList.add("is-on");
       const target = event.target as Element | null;
-      element.classList.toggle("is-hover", Boolean(target?.closest("a, button, canvas, [role='button'], input, textarea, select")));
+      element.classList.toggle("is-hover", Boolean(target?.closest("a, button, [role='button'], input, textarea, select")));
+      element.classList.toggle("is-grab", Boolean(target?.closest("canvas")));
     };
     const leave = () => element.classList.remove("is-on");
+    const press = (event: PointerEvent) => {
+      if ((event.target as Element | null)?.closest("canvas")) element.classList.add("is-grabbing");
+    };
+    const release = () => element.classList.remove("is-grabbing");
     const tick = () => {
       x += (targetX - x) * 0.2;
       y += (targetY - y) * 0.2;
@@ -65,10 +70,14 @@ function GlowCursor() {
       frame = window.requestAnimationFrame(tick);
     };
     window.addEventListener("pointermove", move, { passive: true });
+    window.addEventListener("pointerdown", press);
+    window.addEventListener("pointerup", release);
     document.documentElement.addEventListener("pointerleave", leave);
     frame = window.requestAnimationFrame(tick);
     return () => {
       window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerdown", press);
+      window.removeEventListener("pointerup", release);
       document.documentElement.removeEventListener("pointerleave", leave);
       window.cancelAnimationFrame(frame);
     };
@@ -112,6 +121,8 @@ export function LandingExperience() {
   const progressRef = useRef(0);
   const [sceneReady, setSceneReady] = useState(false);
   const [minTimePassed, setMinTimePassed] = useState(false);
+  const [hasDragged, setHasDragged] = useState(false);
+  const handleFirstDrag = useCallback(() => setHasDragged(true), []);
 
   const showScene = client && webgl && !small;
   const loaded = minTimePassed && (sceneReady || !showScene);
@@ -138,14 +149,30 @@ export function LandingExperience() {
     };
   }, []);
 
-  // Reveal copy as each beat scrolls into view.
+  // Show a beat's copy only while that beat fills the screen, so text never
+  // lingers under the top bar or overlaps the next beat's copy.
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => entries.forEach((entry) => entry.target.classList.toggle("is-visible", entry.isIntersecting)),
-      { threshold: 0.2 },
-    );
-    document.querySelectorAll(".beat").forEach((element) => observer.observe(element));
-    return () => observer.disconnect();
+    const beats = Array.from(document.querySelectorAll<HTMLElement>(".beat"));
+    let frame = 0;
+    const check = () => {
+      frame = 0;
+      const vh = window.innerHeight;
+      beats.forEach((beat) => {
+        const rect = beat.getBoundingClientRect();
+        beat.classList.toggle("is-visible", rect.top <= vh * 0.4 && rect.bottom >= vh * 0.92);
+      });
+    };
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(check);
+    };
+    check();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   return (
@@ -160,6 +187,7 @@ export function LandingExperience() {
               reducedMotion={reduced}
               interactive={!coarse}
               onReady={() => setSceneReady(true)}
+              onFirstDrag={handleFirstDrag}
             />
           </Suspense>
         ) : (
@@ -167,6 +195,13 @@ export function LandingExperience() {
         )}
         <div className="world-vignette" />
       </div>
+
+      {showScene && !coarse && (
+        <div className={`drag-hint ${hasDragged ? "is-done" : ""}`} aria-hidden="true">
+          <span className="drag-hint-icon" />
+          Drag the clock to look around · double-click to reset
+        </div>
+      )}
 
       <header className="world-nav">
         <BrandLockup />
