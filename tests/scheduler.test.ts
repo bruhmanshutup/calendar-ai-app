@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { extractedTaskSchema } from "../lib/domain/extraction-schema";
 import { generateSchedule } from "../lib/domain/scheduler";
 import type { TimeInterval } from "../lib/domain/types";
 import { scheduling, task, TEST_PREFERENCES } from "./fixtures";
@@ -27,6 +28,157 @@ describe("deterministic scheduling", () => {
         .filter((session) => session.taskId === "deadline")
         .every((session) => new Date(session.end) <= new Date(dueAt)),
     ).toBe(true);
+  });
+
+  it("honors a task-specific maximum session length", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "session-cap",
+          title: "Study biology",
+          estimatedMinutes: 120,
+          splittable: true,
+          minimumSessionMinutes: 15,
+          schedulingConstraints: { maximumSessionMinutes: 30 },
+        }),
+      ]),
+    );
+    const sessions = proposal.sessions.filter(
+      (session) => session.taskId === "session-cap",
+    );
+
+    expect(sessions).toHaveLength(4);
+    expect(
+      sessions.every(
+        (session) =>
+          (new Date(session.end).getTime() -
+            new Date(session.start).getTime()) /
+            60_000 <=
+          30,
+      ),
+    ).toBe(true);
+  });
+
+  it("treats the start of a due window as the conservative deadline", () => {
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "window-deadline",
+            title: "Send drawings by Wednesday afternoon",
+            estimatedMinutes: 45,
+            dueWindow: {
+              start: "2026-07-29T12:00:00.000Z",
+              end: "2026-07-29T17:00:00.000Z",
+              label: "Wednesday afternoon",
+              precision: "named_period",
+            },
+          }),
+        ],
+        {
+          availability: [
+            {
+              start: "2026-07-29T12:00:00.000Z",
+              end: "2026-07-29T14:00:00.000Z",
+            },
+          ],
+        },
+      ),
+    );
+
+    expect(proposal.sessions).toHaveLength(0);
+    expect(proposal.unschedulable[0]?.reasonCode).toBe(
+      "NO_VALID_TIME_BEFORE_DEADLINE",
+    );
+  });
+
+  it("favors a preferred named period when the whole session fits", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "thursday-evening-edits",
+          title: "Make final edits Thursday evening",
+          estimatedMinutes: 60,
+          schedulingConstraints: {
+            preferredDateWindows: [
+              {
+                start: "2026-07-30T16:00:00.000Z",
+                end: "2026-07-30T18:00:00.000Z",
+                label: "Thursday evening",
+                precision: "named_period",
+              },
+            ],
+          },
+        }),
+      ]),
+    );
+    const session = proposal.sessions[0];
+
+    expect(session.start >= "2026-07-30T16:00:00.000Z").toBe(true);
+    expect(session.end <= "2026-07-30T18:00:00.000Z").toBe(true);
+    expect(session.reasonCodes).toContain("TASK_TIME_WINDOW");
+  });
+
+  it("keeps preferred date windows soft when no opening fits", () => {
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "soft-thursday-evening",
+            title: "Prefer Thursday evening",
+            estimatedMinutes: 60,
+            schedulingConstraints: {
+              preferredDateWindows: [
+                {
+                  start: "2026-07-30T19:00:00.000Z",
+                  end: "2026-07-30T21:00:00.000Z",
+                  label: "Thursday evening",
+                  precision: "named_period",
+                },
+              ],
+            },
+          }),
+        ],
+        {
+          availability: [
+            {
+              start: "2026-07-30T15:00:00.000Z",
+              end: "2026-07-30T17:00:00.000Z",
+            },
+          ],
+        },
+      ),
+    );
+
+    expect(proposal.sessions).toHaveLength(1);
+    expect(proposal.unschedulable).toHaveLength(0);
+    expect(
+      proposal.sessions[0].end <= "2026-07-30T17:00:00.000Z",
+    ).toBe(true);
+  });
+
+  it("validates temporal window bounds and metadata", () => {
+    const valid = task({
+      id: "valid-window",
+      title: "Valid window",
+      dueWindow: {
+        start: "2026-07-29T12:00:00.000Z",
+        end: "2026-07-29T17:00:00.000Z",
+        label: "Wednesday afternoon",
+        precision: "named_period",
+      },
+    });
+    const reversed = {
+      ...valid,
+      dueWindow: {
+        ...valid.dueWindow!,
+        start: valid.dueWindow!.end,
+        end: valid.dueWindow!.start,
+      },
+    };
+
+    expect(extractedTaskSchema.safeParse(valid).success).toBe(true);
+    expect(extractedTaskSchema.safeParse(reversed).success).toBe(false);
   });
 
   it("places overdue work in the earliest valid opening", () => {
@@ -1190,6 +1342,380 @@ describe("deterministic scheduling", () => {
     expect(adjacent.unschedulable).toHaveLength(0);
   });
 
+  it("limits quota recurrences to their stated weekdays", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "weekday-quota",
+          title: "Review calculus",
+          taskType: "recurring_goal",
+          estimatedMinutes: 45,
+          recurrence: {
+            frequency: "weekly",
+            mode: "quota",
+            count: 2,
+            daysOfWeek: ["tuesday", "thursday"],
+          },
+        }),
+      ]),
+    );
+
+    expect(
+      proposal.sessions
+        .filter((session) => session.taskId === "weekday-quota")
+        .map((session) => session.start.slice(0, 10)),
+    ).toEqual(["2026-07-28", "2026-07-30"]);
+    expect(proposal.unschedulable).toHaveLength(0);
+  });
+
+  it("treats allowed date windows as hard absolute boundaries", () => {
+    const allowedWindow = {
+      start: "2026-07-28T10:00:00.000Z",
+      end: "2026-07-28T11:00:00.000Z",
+      label: "Tuesday appointment window",
+      precision: "exact" as const,
+    };
+    const fitting = generateSchedule(
+      scheduling([
+        task({
+          id: "date-window-fit",
+          title: "Call the supplier",
+          estimatedMinutes: 45,
+          schedulingConstraints: { allowedDateWindows: [allowedWindow] },
+        }),
+      ]),
+    );
+    const crossing = generateSchedule(
+      scheduling([
+        task({
+          id: "date-window-crossing",
+          title: "Long supplier call",
+          estimatedMinutes: 75,
+          schedulingConstraints: { allowedDateWindows: [allowedWindow] },
+        }),
+      ]),
+    );
+
+    expect(
+      fitting.sessions[0].start >= "2026-07-28T10:00:00.000Z",
+    ).toBe(true);
+    expect(
+      fitting.sessions[0].end <= "2026-07-28T11:00:00.000Z",
+    ).toBe(true);
+    expect(crossing.sessions).toHaveLength(0);
+    expect(crossing.unschedulable).toHaveLength(1);
+  });
+
+  it("applies allowed date windows to fixed-time tasks", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "fixed-outside-date-window",
+          title: "Feedback meeting",
+          taskType: "fixed_time",
+          estimatedMinutes: 60,
+          fixedStartAt: "2026-07-28T09:00:00.000Z",
+          fixedEndAt: "2026-07-28T10:00:00.000Z",
+          schedulingConstraints: {
+            allowedDateWindows: [
+              {
+                start: "2026-07-28T10:00:00.000Z",
+                end: "2026-07-28T12:00:00.000Z",
+                label: "Allowed meeting window",
+                precision: "exact",
+              },
+            ],
+          },
+        }),
+      ]),
+    );
+
+    expect(proposal.sessions).toHaveLength(0);
+    expect(proposal.unschedulable[0]?.reasonCode).toBe("FIXED_TIME_CONFLICT");
+  });
+
+  it("enforces hard dependency ordering and minimum gaps", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "dependent-work",
+          title: "Start CAD assembly",
+          estimatedMinutes: 60,
+          priority: "urgent",
+          dependencies: [
+            {
+              taskId: "prerequisite-work",
+              relation: "after",
+              strength: "hard",
+              minimumGapMinutes: 30,
+            },
+          ],
+        }),
+        task({
+          id: "prerequisite-work",
+          title: "Finish motor calculations",
+          estimatedMinutes: 60,
+          priority: "low",
+        }),
+      ]),
+    );
+    const prerequisite = proposal.sessions.find(
+      (session) => session.taskId === "prerequisite-work",
+    );
+    const dependent = proposal.sessions.find(
+      (session) => session.taskId === "dependent-work",
+    );
+
+    expect(prerequisite).toBeDefined();
+    expect(dependent).toBeDefined();
+    expect(
+      new Date(dependent!.start).getTime() -
+        new Date(prerequisite!.end).getTime(),
+    ).toBeGreaterThanOrEqual(30 * 60_000);
+    expect(proposal.unschedulable).toHaveLength(0);
+  });
+
+  it("schedules a hard predecessor before a fixed event", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "meeting-prep",
+          title: "Prepare meeting notes",
+          estimatedMinutes: 60,
+          dependencies: [
+            {
+              taskId: "fixed-meeting",
+              relation: "before",
+              strength: "hard",
+              minimumGapMinutes: 30,
+            },
+          ],
+        }),
+        task({
+          id: "fixed-meeting",
+          title: "Team meeting",
+          taskType: "fixed_time",
+          estimatedMinutes: 60,
+          fixedStartAt: "2026-07-27T11:00:00.000Z",
+          fixedEndAt: "2026-07-27T12:00:00.000Z",
+        }),
+      ]),
+    );
+    const prep = proposal.sessions.find(
+      (session) => session.taskId === "meeting-prep",
+    );
+    const meeting = proposal.sessions.find(
+      (session) => session.taskId === "fixed-meeting",
+    );
+
+    expect(prep).toBeDefined();
+    expect(meeting).toBeDefined();
+    expect(
+      new Date(meeting!.start).getTime() - new Date(prep!.end).getTime(),
+    ).toBeGreaterThanOrEqual(30 * 60_000);
+  });
+
+  it("uses milestones as dependency anchors without creating work sessions", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "submission-milestone",
+          title: "Proposal submission deadline",
+          responsibilityKind: "milestone",
+          dueDate: "2026-07-27",
+          dueAt: "2026-07-27T12:00:00.000Z",
+          estimatedMinutes: 45,
+        }),
+        task({
+          id: "finish-proposal",
+          title: "Finish the proposal",
+          estimatedMinutes: 60,
+          dependencies: [
+            {
+              taskId: "submission-milestone",
+              relation: "before",
+              strength: "hard",
+              minimumGapMinutes: 30,
+            },
+          ],
+        }),
+      ]),
+    );
+    const work = proposal.sessions.find(
+      (session) => session.taskId === "finish-proposal",
+    );
+
+    expect(
+      proposal.sessions.some(
+        (session) => session.taskId === "submission-milestone",
+      ),
+    ).toBe(false);
+    expect(work).toBeDefined();
+    expect(work!.end <= "2026-07-27T11:30:00.000Z").toBe(true);
+    expect(proposal.unschedulable).toHaveLength(0);
+    expect(proposal.planHealth.scheduledPercent).toBe(100);
+  });
+
+  it("uses soft dependencies as preferences without making them mandatory", () => {
+    const followUp = task({
+      id: "soft-follow-up",
+      title: "Apply meeting feedback",
+      estimatedMinutes: 60,
+      dependencies: [
+        {
+          taskId: "soft-anchor",
+          relation: "after",
+          strength: "soft",
+          minimumGapMinutes: 30,
+        },
+      ],
+    });
+    const meeting = task({
+      id: "soft-anchor",
+      title: "Feedback meeting",
+      taskType: "fixed_time",
+      estimatedMinutes: 60,
+      fixedStartAt: "2026-07-27T11:00:00.000Z",
+      fixedEndAt: "2026-07-27T12:00:00.000Z",
+    });
+    const preferred = generateSchedule(
+      scheduling([followUp, meeting], {
+        availability: [
+          {
+            start: "2026-07-27T08:00:00.000Z",
+            end: "2026-07-27T10:00:00.000Z",
+          },
+          {
+            start: "2026-07-27T11:00:00.000Z",
+            end: "2026-07-27T14:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    const constrained = generateSchedule(
+      scheduling([followUp, meeting], {
+        availability: [
+          {
+            start: "2026-07-27T08:00:00.000Z",
+            end: "2026-07-27T12:00:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    const preferredFollowUp = preferred.sessions.find(
+      (session) => session.taskId === "soft-follow-up",
+    );
+    const reversedFollowUp = constrained.sessions.find(
+      (session) => session.taskId === "soft-follow-up",
+    );
+    expect(
+      preferredFollowUp!.start >= "2026-07-27T12:30:00.000Z",
+    ).toBe(true);
+    expect(reversedFollowUp!.end <= "2026-07-27T10:30:00.000Z").toBe(true);
+    expect(constrained.unschedulable).toHaveLength(0);
+  });
+
+  it("blocks dependents when a hard prerequisite cannot be scheduled", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "oversized-prerequisite",
+          title: "Complete the prerequisite",
+          estimatedMinutes: 120,
+          minimumSessionMinutes: 120,
+          splittable: true,
+        }),
+        task({
+          id: "blocked-dependent",
+          title: "Complete the dependent work",
+          dependencies: [
+            {
+              taskId: "oversized-prerequisite",
+              relation: "after",
+              strength: "hard",
+            },
+          ],
+        }),
+      ]),
+    );
+
+    expect(proposal.sessions).toHaveLength(0);
+    expect(proposal.unschedulable.map((item) => item.reasonCode)).toEqual([
+      "MINIMUM_SESSION_TOO_LARGE",
+      "SEQUENCE_BLOCKED",
+    ]);
+  });
+
+  it("keeps unresolved and cyclic hard dependencies review-safe", () => {
+    const unresolved = generateSchedule(
+      scheduling([
+        task({
+          id: "unresolved-hard",
+          title: "Wait for an unknown prerequisite",
+          dependencies: [
+            {
+              taskId: "not-in-this-plan",
+              relation: "after",
+              strength: "hard",
+            },
+          ],
+        }),
+        task({
+          id: "unresolved-soft",
+          title: "Prefer an unknown prerequisite",
+          dependencies: [
+            {
+              taskId: "also-not-in-this-plan",
+              relation: "after",
+              strength: "soft",
+            },
+          ],
+        }),
+      ]),
+    );
+    const cyclicTasks = [
+      task({
+        id: "cycle-a",
+        title: "Cycle A",
+        dependencies: [
+          {
+            taskId: "cycle-b",
+            relation: "after",
+            strength: "hard",
+          },
+        ],
+      }),
+      task({
+        id: "cycle-b",
+        title: "Cycle B",
+        dependencies: [
+          {
+            taskId: "cycle-a",
+            relation: "after",
+            strength: "hard",
+          },
+        ],
+      }),
+    ];
+    const cyclic = generateSchedule(scheduling(cyclicTasks));
+
+    expect(
+      unresolved.sessions.map((session) => session.taskId),
+    ).toContain("unresolved-soft");
+    expect(
+      unresolved.sessions.map((session) => session.taskId),
+    ).not.toContain("unresolved-hard");
+    expect(
+      unresolved.unschedulable.find(
+        (item) => item.taskId === "unresolved-hard",
+      )?.reasonCode,
+    ).toBe("MISSING_REQUIRED_INFORMATION");
+    expect(cyclic.sessions).toHaveLength(0);
+    expect(cyclic.unschedulable).toHaveLength(2);
+    expect(generateSchedule(scheduling(cyclicTasks))).toEqual(cyclic);
+  });
+
   it("counts overlapping availability and calendar blocks only once", () => {
     const proposal = generateSchedule(
       scheduling([], {
@@ -1240,5 +1766,243 @@ describe("deterministic scheduling", () => {
     expect(session).toBeDefined();
     expect(session.start.slice(11, 16) >= "08:00").toBe(true);
     expect(session.end.slice(11, 16) <= "20:00").toBe(true);
+  });
+
+  it("keeps a hard successor inside its maximum lag after the prerequisite", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "lab-complete",
+          title: "Complete lab",
+          taskType: "fixed_time",
+          fixedStartAt: "2026-07-27T08:00:00.000Z",
+          fixedEndAt: "2026-07-27T09:00:00.000Z",
+          estimatedMinutes: 60,
+        }),
+        task({
+          id: "submit-results",
+          title: "Submit lab results",
+          estimatedMinutes: 45,
+          schedulingConstraints: {
+            preferredDateWindows: [
+              {
+                start: "2026-07-27T16:00:00.000Z",
+                end: "2026-07-27T18:00:00.000Z",
+                label: "Preferred late afternoon",
+                precision: "exact",
+              },
+            ],
+          },
+          dependencies: [
+            {
+              taskId: "lab-complete",
+              relation: "after",
+              strength: "hard",
+              minimumGapMinutes: 15,
+              maximumLagMinutes: 60,
+            },
+          ],
+        }),
+      ]),
+    );
+    const successor = proposal.sessions.find(
+      (session) => session.taskId === "submit-results",
+    );
+
+    expect(successor).toBeDefined();
+    expect(successor!.start >= "2026-07-27T09:15:00.000Z").toBe(true);
+    expect(successor!.start <= "2026-07-27T10:00:00.000Z").toBe(true);
+    expect(proposal.unschedulable).toHaveLength(0);
+  });
+
+  it("keeps a hard predecessor inside its maximum lag before a fixed event", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "prepare-demo",
+          title: "Prepare demo",
+          estimatedMinutes: 60,
+          schedulingConstraints: {
+            preferredTimeWindows: [{ start: "08:00", end: "11:00" }],
+          },
+          dependencies: [
+            {
+              taskId: "demo",
+              relation: "before",
+              strength: "hard",
+              minimumGapMinutes: 30,
+              maximumLagMinutes: 120,
+            },
+          ],
+        }),
+        task({
+          id: "demo",
+          title: "Give demo",
+          taskType: "fixed_time",
+          responsibilityKind: "event",
+          fixedStartAt: "2026-07-27T17:00:00.000Z",
+          fixedEndAt: "2026-07-27T18:00:00.000Z",
+          estimatedMinutes: 60,
+        }),
+      ]),
+    );
+    const predecessor = proposal.sessions.find(
+      (session) => session.taskId === "prepare-demo",
+    );
+
+    expect(predecessor).toBeDefined();
+    expect(predecessor!.end >= "2026-07-27T15:00:00.000Z").toBe(true);
+    expect(predecessor!.end <= "2026-07-27T16:30:00.000Z").toBe(true);
+    expect(proposal.unschedulable).toHaveLength(0);
+  });
+
+  it("leaves a hard successor unscheduled when its maximum-lag window is closed", () => {
+    const proposal = generateSchedule(
+      scheduling(
+        [
+          task({
+            id: "handoff",
+            title: "Finish handoff",
+            taskType: "fixed_time",
+            fixedStartAt: "2026-07-27T08:00:00.000Z",
+            fixedEndAt: "2026-07-27T09:00:00.000Z",
+            estimatedMinutes: 60,
+          }),
+          task({
+            id: "follow-up",
+            title: "Complete follow-up",
+            estimatedMinutes: 45,
+            dependencies: [
+              {
+                taskId: "handoff",
+                relation: "after",
+                strength: "hard",
+                maximumLagMinutes: 60,
+              },
+            ],
+          }),
+        ],
+        {
+          availability: [
+            {
+              start: "2026-07-27T08:00:00.000Z",
+              end: "2026-07-27T09:00:00.000Z",
+            },
+            {
+              start: "2026-07-27T12:00:00.000Z",
+              end: "2026-07-27T14:00:00.000Z",
+            },
+          ],
+        },
+      ),
+    );
+
+    expect(
+      proposal.sessions.some((session) => session.taskId === "follow-up"),
+    ).toBe(false);
+    expect(
+      proposal.unschedulable.some((item) => item.taskId === "follow-up"),
+    ).toBe(true);
+  });
+
+  it("uses the longer conditional review only before a known exam", () => {
+    const calculusReview = task({
+      id: "calculus-review",
+      title: "Review calculus",
+      taskType: "recurring_goal",
+      estimatedMinutes: 45,
+      recurrence: {
+        frequency: "weekly",
+        mode: "quota",
+        count: 3,
+        daysOfWeek: ["monday", "wednesday", "friday"],
+      },
+      conditionalRules: [
+        {
+          condition: "An exam is scheduled for the next day",
+          effect: "Use a 90-minute review instead of 45 minutes",
+          requiresReview: true,
+        },
+      ],
+    });
+    const withoutExam = generateSchedule(scheduling([calculusReview]));
+    const withExam = generateSchedule(
+      scheduling([
+        calculusReview,
+        task({
+          id: "calculus-exam",
+          title: "Calculus exam",
+          responsibilityKind: "event",
+          taskType: "fixed_time",
+          fixedStartAt: "2026-07-28T13:00:00.000Z",
+          fixedEndAt: "2026-07-28T14:00:00.000Z",
+          estimatedMinutes: 60,
+        }),
+      ]),
+    );
+    const baseReviews = withoutExam.sessions.filter(
+      (session) => session.taskId === "calculus-review",
+    );
+    const conditionalReviews = withExam.sessions.filter(
+      (session) => session.taskId === "calculus-review",
+    );
+
+    expect(baseReviews.map((session) => session.minutes)).toEqual([45, 45, 45]);
+    expect(
+      conditionalReviews.map((session) => [
+        session.start.slice(0, 10),
+        session.minutes,
+      ]),
+    ).toEqual([
+      ["2026-07-27", 90],
+      ["2026-07-29", 45],
+      ["2026-07-31", 45],
+    ]);
+    expect(withExam.planHealth.scheduledPercent).toBe(100);
+  });
+
+  it("does not execute arbitrary conditional prose or treat exam prep as an exam", () => {
+    const review = task({
+      id: "guarded-review",
+      title: "Review calculus",
+      taskType: "recurring_goal",
+      estimatedMinutes: 45,
+      recurrence: {
+        frequency: "weekly",
+        mode: "quota",
+        count: 1,
+        daysOfWeek: ["monday"],
+      },
+      conditionalRules: [
+        {
+          condition: "If the weather is bad",
+          effect: "Use a 90-minute review instead of 45 minutes",
+          requiresReview: true,
+        },
+        {
+          condition: "An exam is scheduled for the next day",
+          effect: "Use a 90-minute review instead of 45 minutes",
+          requiresReview: true,
+        },
+      ],
+    });
+    const proposal = generateSchedule(
+      scheduling([
+        review,
+        task({
+          id: "exam-prep",
+          title: "Study for the calculus exam",
+          taskType: "fixed_time",
+          fixedStartAt: "2026-07-28T13:00:00.000Z",
+          fixedEndAt: "2026-07-28T14:00:00.000Z",
+          estimatedMinutes: 60,
+        }),
+      ]),
+    );
+    const session = proposal.sessions.find(
+      (item) => item.taskId === "guarded-review",
+    );
+
+    expect(session?.minutes).toBe(45);
   });
 });

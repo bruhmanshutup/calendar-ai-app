@@ -39,4 +39,24 @@ describe("hybrid extraction strategy", () => {
     const text = `${"Background context. ".repeat(20)}Please review the model, email Legal, and submit the memo by Friday.`;
     expect(await decision(text)).toBe(false);
   });
+
+  it("trusts an explicitly indexed learning plan even when surrounding resources make it long", async () => {
+    const resources = Array.from(
+      { length: 80 },
+      (_, index) =>
+        `Resource ${index + 1}: https://example.com/tutorial/${index + 1} ${"background reading ".repeat(14)}`,
+    ).join("\n");
+    const text = `Week 1 – Foundations
+${resources}
+Daily checklist:
+Day 1: Read the overview.
+Day 2: Watch the lesson.
+Week 2 – Practice
+Daily checklist:
+Day 1: Build the example.
+Day 2: Write the summary.`;
+
+    expect(text.length).toBeGreaterThan(20_000);
+    expect(await decision(text)).toBe(true);
+  });
 });

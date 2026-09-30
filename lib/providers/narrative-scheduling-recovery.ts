@@ -481,6 +481,11 @@ function enrichTasks(
   });
 }
 
+/**
+ * @deprecated Legacy compatibility fixture. It contains example-specific
+ * scheduling assumptions and must not be used by a production extraction
+ * pipeline. See extraction-pipeline.ts for the source-grounded replacement.
+ */
 export function recoverNarrativeSchedulingIntent(
   input: ExtractionInput,
   result: ExtractionResult,

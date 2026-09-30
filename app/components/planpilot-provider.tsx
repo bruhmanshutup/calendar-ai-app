@@ -13,9 +13,24 @@ import {
 import { addDays, format, parseISO } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { DEFAULT_PREFERENCES } from "@/lib/defaults";
+import {
+  extractionFailureMessage,
+  extractionFallbackNotice,
+  type ExtractionFallbackReason,
+  type ExtractionPipelineReport,
+} from "@/lib/domain/extraction-diagnostics";
 import { generateSchedule } from "@/lib/domain/scheduler";
-import { latestSequenceTargetDate } from "@/lib/domain/task-sequence";
-import { mergeImportedTasks } from "@/lib/domain/task-import";
+import { applyLinkedTaskEdit, recalculateLinkedTiming } from "@/lib/domain/linked-timing";
+import { withUserFieldProvenance } from "@/lib/domain/task-provenance";
+import {
+  latestSequenceTargetDate,
+  taskSequence,
+} from "@/lib/domain/task-sequence";
+import {
+  mergeImportedTasks,
+  sessionsToPreserveAfterImport,
+} from "@/lib/domain/task-import";
+import { mergeImportedPlanningRules } from "@/lib/domain/planning-rules";
 import {
   deadlineUpdateFields,
   intervalOverlapsManualPlacement,
@@ -37,11 +52,15 @@ import {
   sessionCheckIns,
   type SessionCheckIn,
 } from "@/lib/domain/session-review";
-import { parsePersistedWorkspace } from "@/lib/domain/workspace-state";
+import {
+  parsePersistedWorkspace,
+  type ExtractionMode,
+} from "@/lib/domain/workspace-state";
 import type {
   ExistingSession,
   ExtractedTask,
   HistoryItem,
+  InterpretationTrace,
   PlannedSession,
   PlanningMode,
   PlanningRules,
@@ -52,9 +71,10 @@ import type {
   SessionOutcome,
   SessionReview,
 } from "@/lib/domain/types";
+import type { DocumentReference } from "@/lib/domain/document-import";
+import { attachDocumentSource } from "@/lib/domain/document-import";
 
 type ImportState = "idle" | "loading" | "success" | "error";
-type ExtractionMode = "gemini" | "openai" | "local" | "fast-local";
 type WorkspaceStatus = "loading" | "ready" | "error";
 
 type PlanPilotContextValue = {
@@ -63,11 +83,15 @@ type PlanPilotContextValue = {
   proposal: ScheduleProposal;
   importText: string;
   setImportText: (text: string) => void;
+  setImportDocumentSource: (source?: DocumentReference) => void;
   importState: ImportState;
   extractionMode?: ExtractionMode;
+  extractionReport?: ExtractionPipelineReport;
   importError?: string;
-  analyzeText: () => Promise<void>;
+  interpretationTrace?: InterpretationTrace;
+  analyzeText: (instructions?: { globalInstructions?: string; allowInlineGlobalInstructions?: boolean }) => Promise<void>;
   updateTask: (id: string, patch: Partial<ExtractedTask>) => void;
+  setSequenceStartDate: (groupId: string, date?: string) => void;
   approveTask: (id: string) => void;
   deleteTask: (id: string) => void;
   deleteTasks: (ids: string[]) => void;
@@ -113,7 +137,12 @@ type PlanPilotContextValue = {
 const Context = createContext<PlanPilotContextValue | null>(null);
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
-const CURRENT_SCHEDULER_VERSION = 11;
+const CURRENT_SCHEDULER_VERSION = 14;
+const PLAN_START_DATE_REQUIREMENT = "Choose a plan start date";
+
+function isPlanStartDateRequirement(value: string): boolean {
+  return /^choose (?:a )?(?:plan )?start date$/i.test(value.trim());
+}
 
 function currentLocalDate(timeZone: string, instant = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -286,25 +315,6 @@ function scheduleFor(
   return proposal;
 }
 
-function mergePlanningRules(
-  current: PlanningRules,
-  incoming: PlanningRules | undefined,
-): PlanningRules {
-  if (!incoming) return current;
-  const blocked = [...(current.blockedTimes ?? []), ...(incoming.blockedTimes ?? [])];
-  const seen = new Set<string>();
-  return {
-    earliestWorkTime: incoming.earliestWorkTime ?? current.earliestWorkTime,
-    latestWorkTime: incoming.latestWorkTime ?? current.latestWorkTime,
-    blockedTimes: blocked.filter((item) => {
-      const key = `${item.start}|${item.end}|${item.label}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).slice(-100),
-  };
-}
-
 function asExisting(session: PlannedSession): ExistingSession {
   return {
     id: session.id,
@@ -333,6 +343,28 @@ function nowLabel(): string {
   }).format(new Date());
 }
 
+export function extractionModeImportSummary(
+  mode: ExtractionMode | undefined,
+): string {
+  switch (mode) {
+    case "gemini-hybrid":
+      return "Gemini interpreted task meaning and relationships; local source checks verified dates, times, and exact text against the original.";
+    case "openai-hybrid":
+      return "OpenAI interpreted task meaning and relationships; local source checks verified dates, times, and exact text against the original.";
+    case "local-fallback":
+      return "AI interpretation was unavailable, so PlanPilot used local parsing. Review uncertain task types, dates, times, and relationships before scheduling.";
+    case "gemini":
+      return "Gemini interpreted the responsibilities; source text remains available for review.";
+    case "openai":
+      return "OpenAI interpreted the responsibilities; source text remains available for review.";
+    case "fast-local":
+      return "Fast local interpretation avoided a network wait; source text and uncertain fields remain available for review.";
+    case "local":
+    default:
+      return "Local interpretation completed; source text and uncertain fields remain available for review.";
+  }
+}
+
 export function PlanPilotProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<ExtractedTask[]>([]);
   const [lastImportedTaskIds, setLastImportedTaskIds] = useState<string[]>([]);
@@ -343,9 +375,14 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     scheduleFor([], "balanced"),
   );
   const [importText, setImportText] = useState("");
+  const [importDocumentSource, setImportDocumentSource] = useState<DocumentReference>();
   const [importState, setImportState] = useState<ImportState>("idle");
   const [extractionMode, setExtractionMode] = useState<ExtractionMode>();
+  const [extractionReport, setExtractionReport] =
+    useState<ExtractionPipelineReport>();
   const [importError, setImportError] = useState<string>();
+  const [interpretationTrace, setInterpretationTrace] =
+    useState<InterpretationTrace>();
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [exportState, setExportState] =
     useState<PlanPilotContextValue["exportState"]>("idle");
@@ -544,17 +581,24 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     [planningMode, planningRules],
   );
 
-  const analyzeText = useCallback(async () => {
+  const analyzeText = useCallback(async (instructions?: { globalInstructions?: string; allowInlineGlobalInstructions?: boolean }) => {
     setImportState("loading");
     setExtractionMode(undefined);
+    setExtractionReport(undefined);
     setImportError(undefined);
+    setInterpretationTrace(undefined);
     try {
       const response = await fetch("/api/extract", {
         method: "POST",
-        signal: AbortSignal.timeout(35_000),
+        // The semantic provider has a 45-second repair/retry budget. Keep the
+        // browser alive long enough to receive that safe result plus server
+        // compilation and network overhead.
+        signal: AbortSignal.timeout(60_000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: importText,
+          globalInstructions: instructions?.globalInstructions,
+          allowInlineGlobalInstructions: instructions?.allowInlineGlobalInstructions ?? false,
           currentLocalDate: currentLocalDate(DEFAULT_PREFERENCES.timeZone),
           timeZone: DEFAULT_PREFERENCES.timeZone,
         }),
@@ -562,28 +606,37 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       const body = (await response.json()) as {
         tasks?: ExtractedTask[];
         planningRules?: PlanningRules;
+        interpretation?: InterpretationTrace;
         extractionMode?: ExtractionMode;
-        error?: { message: string };
+        extractionReport?: ExtractionPipelineReport;
+        error?: { message: string; reason?: ExtractionFallbackReason };
       };
       if (!response.ok || !body.tasks) {
-        throw new Error(body.error?.message ?? "Extraction failed.");
+        const providerMessage = body.error?.message ?? "Extraction failed.";
+        throw new Error(
+          extractionFailureMessage(body.error?.reason, providerMessage),
+        );
       }
-      const extractedTasks = body.tasks;
-      const nextPlanningRules = mergePlanningRules(
+      const extractedTasks = importDocumentSource
+        ? body.tasks.map((task) => attachDocumentSource(task, importDocumentSource))
+        : body.tasks;
+      const nextPlanningRules = mergeImportedPlanningRules(
         planningRules,
         body.planningRules,
+        DEFAULT_PREFERENCES.timeZone,
       );
-      const localEstimateCount = extractedTasks.filter(
-        (task) => task.effortEstimateSource === "heuristic",
-      ).length;
       const merged = mergeImportedTasks(tasks, extractedTasks);
+      merged.tasks = recalculateLinkedTiming(merged.tasks, DEFAULT_PREFERENCES.timeZone);
       const retainedTaskIds = new Set(
         merged.tasks
           .map((task) => task.id)
           .filter((id): id is string => !!id),
       );
-      const preservedSessions = proposal.sessions.filter((session) =>
-        retainedTaskIds.has(session.taskId),
+      const refreshedTaskIds = new Set(merged.refreshedTaskIds);
+      const preservedSessions = sessionsToPreserveAfterImport(
+        proposal.sessions,
+        retainedTaskIds,
+        refreshedTaskIds,
       );
       const preservedSessionIds = new Set(
         preservedSessions.map((session) => session.id),
@@ -602,6 +655,8 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       setPlanningRules(nextPlanningRules);
       setLastImportedTaskIds(merged.importedTaskIds);
       setExtractionMode(body.extractionMode);
+      setExtractionReport(body.extractionReport);
+      setInterpretationTrace(body.interpretation);
       setProposal(
         scheduleFor(
           merged.tasks,
@@ -619,21 +674,25 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           at: nowLabel(),
           icon: "edit",
           title: `${merged.addedTasks.length} responsibilities added`,
-          detail:
-            body.extractionMode === "gemini" || body.extractionMode === "openai"
-              ? `${body.extractionMode === "gemini" ? "Gemini" : "OpenAI"} interpreted the responsibilities${localEstimateCount > 0 ? `; ${localEstimateCount} missed ${localEstimateCount === 1 ? "item uses a" : "items use"} fast local fallback estimate` : " and estimated effort and session length"}; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were reused.` : ""}${merged.removedMetadataCount > 0 ? ` ${merged.removedMetadataCount} non-task portal rows were removed.` : ""}${merged.refreshedTaskCount > 0 ? ` ${merged.refreshedTaskCount} earlier interpretations were corrected.` : ""}`
-              : body.extractionMode === "fast-local"
-                ? `Fast local interpretation avoided a network wait; uncertain estimates remain highlighted for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were reused.` : ""}${merged.removedMetadataCount > 0 ? ` ${merged.removedMetadataCount} non-task portal rows were removed.` : ""}${merged.refreshedTaskCount > 0 ? ` ${merged.refreshedTaskCount} earlier interpretations were corrected.` : ""}`
-              : `Local fallback estimates were used; source text remains available for review.${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were reused.` : ""}${merged.removedMetadataCount > 0 ? ` ${merged.removedMetadataCount} non-task portal rows were removed.` : ""}${merged.refreshedTaskCount > 0 ? ` ${merged.refreshedTaskCount} earlier interpretations were corrected.` : ""}`,
+          detail: `${extractionModeImportSummary(body.extractionMode)}${merged.duplicateCount > 0 ? ` ${merged.duplicateCount} already-added responsibilities were reused.` : ""}${merged.removedMetadataCount > 0 ? ` ${merged.removedMetadataCount} non-task portal rows were removed.` : ""}${merged.refreshedTaskCount > 0 ? ` ${merged.refreshedTaskCount} earlier interpretations were corrected.` : ""}`,
         },
         ...items,
       ]);
-      setToast(
-        merged.removedMetadataCount > 0 || merged.refreshedTaskCount > 0
+      const fallbackNotice = extractionFallbackNotice(body.extractionReport);
+      const ordinarySuccessToast =
+        merged.removedMetadataCount > 0 && merged.refreshedTaskCount > 0
           ? `Cleaned up ${merged.removedMetadataCount} non-task portal rows and corrected ${merged.refreshedTaskCount} earlier interpretations.`
+          : merged.refreshedTaskCount > 0
+            ? `Corrected ${merged.refreshedTaskCount} earlier ${merged.refreshedTaskCount === 1 ? "interpretation" : "interpretations"}.`
+            : merged.removedMetadataCount > 0
+              ? `Cleaned up ${merged.removedMetadataCount} non-task portal ${merged.removedMetadataCount === 1 ? "row" : "rows"}.`
           : merged.addedTasks.length > 0
           ? `${merged.addedTasks.length} responsibilities added. Existing commitments were preserved.`
-          : "Those responsibilities are already in your plan.",
+          : "Those responsibilities are already in your plan.";
+      setToast(
+        fallbackNotice
+          ? `Local fallback used: ${fallbackNotice.title}. ${fallbackNotice.action}`
+          : ordinarySuccessToast,
       );
     } catch (error) {
       setImportState("error");
@@ -646,7 +705,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           : "Extraction failed. Your text is still here to retry.",
       );
     }
-  }, [importText, planningMode, planningRules, proposal, rememberScheduleChange, tasks]);
+  }, [importDocumentSource, importText, planningMode, planningRules, proposal, rememberScheduleChange, tasks]);
 
   const updateTask = useCallback(
     (
@@ -657,9 +716,29 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       if (!tasks.some((task) => task.id === id)) return;
       rememberScheduleChange(undoLabel);
       setTasks((current) => {
-        const next = current.map((task) =>
-          task.id === id ? { ...task, ...patch } : task,
+        const workflowOnlyFields = new Set([
+          "id",
+          "sourceText",
+          "sourceSpan",
+          "fieldProvenance",
+          "dependencies",
+          "missingInformation",
+          "approved",
+          "reviewRequired",
+          "completed",
+          "completedAt",
+          "completedMinutes",
+          "cancelled",
+          "cancelledAt",
+        ]);
+        const editedPaths = Object.keys(patch).filter(
+          (path) => !workflowOnlyFields.has(path),
         );
+        const original = current.find((task) => task.id === id)!;
+        const next = applyLinkedTaskEdit(current, id, {
+          ...patch,
+          fieldProvenance: patch.fieldProvenance ?? withUserFieldProvenance(original, editedPaths),
+        }, DEFAULT_PREFERENCES.timeZone);
         refresh(next);
         return next;
       });
@@ -667,8 +746,158 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     [refresh, rememberScheduleChange, tasks],
   );
 
+  const setSequenceStartDate = useCallback(
+    (groupId: string, date?: string) => {
+      const sequenceTasks = tasks.filter(
+        (task) => taskSequence(task)?.groupId === groupId,
+      );
+      if (sequenceTasks.length === 0) {
+        setToast("That learning plan is no longer available.");
+        return;
+      }
+
+      const anchorDate = date?.trim() || undefined;
+      if (
+        anchorDate &&
+        (!/^\d{4}-\d{2}-\d{2}$/.test(anchorDate) ||
+          Number.isNaN(parseISO(anchorDate).getTime()) ||
+          format(parseISO(anchorDate), "yyyy-MM-dd") !== anchorDate)
+      ) {
+        setToast("Choose a valid plan start date.");
+        return;
+      }
+
+      const nextTasks = tasks.map((task) => {
+        const sequence = taskSequence(task);
+        if (sequence?.groupId !== groupId) return task;
+
+        const missingInformation = anchorDate
+          ? task.missingInformation.filter(
+              (item) => !isPlanStartDateRequirement(item),
+            )
+          : [
+              ...task.missingInformation.filter(
+                (item) => !isPlanStartDateRequirement(item),
+              ),
+              PLAN_START_DATE_REQUIREMENT,
+            ];
+        const reviewRequired = !anchorDate || missingInformation.length > 0;
+
+        return {
+          ...task,
+          sequence: {
+            ...sequence,
+            anchorDate,
+          },
+          missingInformation,
+          reviewRequired,
+          approved: !reviewRequired,
+          fieldProvenance: withUserFieldProvenance(task, [
+            "sequence.anchorDate",
+          ]),
+        };
+      });
+      const hasChanged = sequenceTasks.some((task) => {
+        const sequence = taskSequence(task);
+        const hasStartDateRequirement = task.missingInformation.some(
+          isPlanStartDateRequirement,
+        );
+        const expectedReviewRequired =
+          !anchorDate ||
+          task.missingInformation.some(
+            (item) => !isPlanStartDateRequirement(item),
+          );
+        return (
+          sequence?.anchorDate !== anchorDate ||
+          hasStartDateRequirement === Boolean(anchorDate) ||
+          task.reviewRequired !== expectedReviewRequired ||
+          task.approved === expectedReviewRequired
+        );
+      });
+      if (!hasChanged) return;
+
+      const affectedTaskIds = new Set(
+        sequenceTasks.map((task) => task.id ?? task.title),
+      );
+      const currentTime = Date.now();
+      const completedStatuses = new Set([
+        "completed",
+        "partial",
+        "missed",
+        "unnecessary",
+      ]);
+      const preservedSessions = proposal.sessions.filter(
+        (session) =>
+          !affectedTaskIds.has(session.taskId) ||
+          completedStatuses.has(session.status) ||
+          new Date(session.start).getTime() <= currentTime,
+      );
+      const preservedSessionIds = new Set(
+        preservedSessions.map((session) => session.id),
+      );
+      const preservedBreaks = proposal.breaks.filter((item) =>
+        preservedSessionIds.has(item.afterSessionId),
+      );
+
+      rememberScheduleChange("plan start date change");
+      const nextProposal = scheduleFor(
+        nextTasks,
+        planningMode,
+        preservedSessions,
+        preservedBreaks,
+        planningRules,
+      );
+      const nextSessionIds = new Set(
+        nextProposal.sessions.map((session) => session.id),
+      );
+
+      setTasks(nextTasks);
+      setProposal(nextProposal);
+      setSelectedSessionIds((current) =>
+        current.filter((id) => nextSessionIds.has(id)),
+      );
+      setReplan(undefined);
+      setHistory((items) => [
+        {
+          id: `history-sequence-start-${Date.now()}`,
+          at: nowLabel(),
+          icon: "move",
+          title: anchorDate
+            ? `Plan starts ${format(parseISO(anchorDate), "MMM d, yyyy")}`
+            : "Plan start date cleared",
+          detail: anchorDate
+            ? `${sequenceTasks.length} responsibilities were aligned to the selected start date.`
+            : `${sequenceTasks.length} responsibilities are waiting for a new start date.`,
+        },
+        ...items,
+      ]);
+      setToast(
+        anchorDate
+          ? `Plan moved to start ${format(parseISO(anchorDate), "MMM d")}.`
+          : "Plan start date cleared. Choose a new date before approving it.",
+      );
+    },
+    [
+      planningMode,
+      planningRules,
+      proposal,
+      rememberScheduleChange,
+      tasks,
+    ],
+  );
+
   const approveTask = useCallback(
     (id: string) => {
+      const task = tasks.find((item) => item.id === id);
+      const sequence = task ? taskSequence(task) : undefined;
+      if (task?.schedulingConstraints?.linkedTiming?.unresolved) {
+        setToast("Confirm or correct the related event before approving this calculated time.");
+        return;
+      }
+      if (sequence && !sequence.anchorDate) {
+        setToast("Choose a plan start date before approving this responsibility.");
+        return;
+      }
       updateTask(
         id,
         {
@@ -680,7 +909,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       );
       setToast("Task approved and included in the next proposal.");
     },
-    [updateTask],
+    [tasks, updateTask],
   );
 
   const deleteTasks = useCallback(
@@ -699,9 +928,9 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           .map((task) => task.id)
           .filter((id): id is string => !!id),
       );
-      const nextTasks = tasks.filter(
+      const nextTasks = recalculateLinkedTiming(tasks.filter(
         (task) => !task.id || !removedIds.has(task.id),
-      );
+      ), DEFAULT_PREFERENCES.timeZone);
       const nextPlanningRules = nextTasks.length === 0 ? {} : planningRules;
       const retainedTaskIds = new Set(
         nextTasks
@@ -709,7 +938,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           .filter((id): id is string => !!id),
       );
       const preservedSessions = proposal.sessions.filter((session) =>
-        retainedTaskIds.has(session.taskId),
+        retainedTaskIds.has(session.taskId) && !nextTasks.find((task) => task.id === session.taskId)?.reviewRequired,
       );
       const preservedSessionIds = new Set(
         preservedSessions.map((session) => session.id),
@@ -761,6 +990,9 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       return;
     }
     rememberScheduleChange("session approval");
+    const taskId = proposal.sessions.find((session) => session.id === id)?.taskId;
+    setTasks((current) => current.map((task) => task.id === taskId && task.schedulingConstraints?.calculatedTiming
+      ? { ...task, approved: true, reviewRequired: false, missingInformation: [] } : task));
     setProposal((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
@@ -777,6 +1009,9 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       return;
     }
     rememberScheduleChange("complete plan approval");
+    const approvingTaskIds = new Set(proposal.sessions.filter((session) => session.status === "proposed").map((session) => session.taskId));
+    setTasks((current) => current.map((task) => task.id && approvingTaskIds.has(task.id) && task.schedulingConstraints?.calculatedTiming
+      ? { ...task, approved: true, reviewRequired: false, missingInformation: [] } : task));
     setProposal((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
@@ -915,6 +1150,7 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
                       deadlineUpdate,
                       DEFAULT_PREFERENCES.timeZone,
                     ),
+                    dueWindow: undefined,
                     fieldConfidence: {
                       ...item.fieldConfidence,
                       dueDate: 1,
@@ -1045,22 +1281,43 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
           sessions: approved,
         }),
       });
-      if (!response.ok) throw new Error("Calendar export failed.");
+      if (!response.ok) {
+        const result: unknown = await response.json().catch(() => null);
+        const message =
+          typeof result === "object" && result !== null &&
+          "error" in result && typeof result.error === "object" && result.error !== null &&
+          "message" in result.error && typeof result.error.message === "string"
+            ? result.error.message
+            : "Calendar export failed.";
+        throw new Error(message);
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "planpilot-schedule.ics";
+      document.body.appendChild(link);
+      try {
+        link.click();
+      } finally {
+        link.remove();
+        // Allow the browser to start reading the download before releasing it.
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
       setExportState("success");
-      setToast(`${approved.length} approved sessions exported.`);
+      setToast(`Calendar file ready: ${approved.length} approved sessions. Import it in Google Calendar → Settings → Import & export.`);
       setHistory((items) => [
         {
           id: `history-calendar-${Date.now()}`,
           at: nowLabel(),
           icon: "calendar",
-          title: `${approved.length} sessions exported`,
-          detail: "Created only after explicit approval.",
+          title: `${approved.length} sessions exported to calendar file`,
+          detail: "Downloaded planpilot-schedule.ics for manual import into Google Calendar. This does not sync future changes.",
         },
         ...items,
       ]);
-    } catch {
+    } catch (error) {
       setExportState("error");
-      setToast("Calendar export failed. Your approved plan is unchanged.");
+      setToast(`${error instanceof Error ? error.message : "Calendar export failed."} Your approved plan is unchanged.`);
     }
   }, [proposal.sessions]);
 
@@ -1282,9 +1539,12 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
     setPlanningRules({});
     setProposal(scheduleFor([], planningMode));
     setImportText("");
+    setImportDocumentSource(undefined);
     setImportState("idle");
     setExtractionMode(undefined);
+    setExtractionReport(undefined);
     setImportError(undefined);
+    setInterpretationTrace(undefined);
     setSelectedSessionIds([]);
     setExportState("idle");
     setReplan(undefined);
@@ -1310,11 +1570,15 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       proposal,
       importText,
       setImportText,
+      setImportDocumentSource,
       importState,
       extractionMode,
+      extractionReport,
       importError,
+      interpretationTrace,
       analyzeText,
       updateTask,
+      setSequenceStartDate,
       approveTask,
       deleteTask,
       deleteTasks,
@@ -1353,11 +1617,15 @@ export function PlanPilotProvider({ children }: { children: ReactNode }) {
       lastImportedTaskIds,
       proposal,
       importText,
+      setImportDocumentSource,
       importState,
       extractionMode,
+      extractionReport,
       importError,
+      interpretationTrace,
       analyzeText,
       updateTask,
+      setSequenceStartDate,
       approveTask,
       deleteTask,
       deleteTasks,

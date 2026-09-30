@@ -20,8 +20,98 @@ export type TaskCategory =
 
 export type EnergyDemand = "low" | "medium" | "high";
 export type TaskType = "flexible" | "fixed_time" | "recurring_goal";
+export type ResponsibilityKind = "task" | "event" | "reminder" | "milestone";
+export type DeadlineStrength = "hard" | "soft";
+/** Orthogonal semantic axes for planning and calendar adapters. */
+export type TaskTimingKind =
+  | "fixed_time"
+  | "deadline"
+  | "flexible_window"
+  | "all_day"
+  | "unresolved";
+export type TaskRecurrenceKind = "once" | "recurring";
+export type TaskClassification = {
+  kind: ResponsibilityKind;
+  timing: TaskTimingKind;
+  recurrence: TaskRecurrenceKind;
+};
 
 export type ClockWindow = { start: string; end: string };
+
+export type TimeInterval = {
+  start: string;
+  end: string;
+};
+
+export type TemporalPrecision = "exact" | "named_period" | "approximate";
+
+export type TemporalWindow = TimeInterval & {
+  label: string;
+  precision: TemporalPrecision;
+};
+
+export type DurationRange = {
+  minimumMinutes: number;
+  maximumMinutes?: number;
+  preferredMinutes?: number;
+};
+
+export type ConditionalRule = {
+  condition: string;
+  effect: string;
+  requiresReview?: boolean;
+};
+
+export type FieldOrigin = "explicit" | "derived" | "inferred" | "user";
+
+export type SourceEvidenceSpan = {
+  sourceId?: string;
+  start: number;
+  end: number;
+  quote: string;
+};
+
+export type FieldProvenance = {
+  path: string;
+  origin: FieldOrigin;
+  evidence?: SourceEvidenceSpan[];
+  rationale?: string;
+};
+
+export type TaskDependency = {
+  taskId?: string;
+  targetTitle?: string;
+  relation: "before" | "after";
+  strength?: "hard" | "soft";
+  minimumGapMinutes?: number;
+  maximumLagMinutes?: number;
+  evidence?: SourceEvidenceSpan;
+};
+
+/** Persisted arithmetic, separate from whether a card is fixed or flexible. */
+export type LinkedTiming = {
+  rules: Array<{
+    taskId: string;
+    boundary: "start" | "end";
+    targetBoundary: "start" | "end";
+    offsetMinutes: number;
+    mode: "exact" | "latest" | "earliest";
+    approximate: boolean;
+  }>;
+  approximate: boolean;
+  durationEstimated: boolean;
+  arrivalBuffer: boolean;
+  unresolved?: boolean;
+};
+
+export type InterpretationTrace = {
+  discoveredResponsibilityCount: number;
+  explicitFieldCount: number;
+  derivedFieldCount: number;
+  inferredFieldCount: number;
+  globalInstructions: SourceEvidenceSpan[];
+  validationWarnings: string[];
+};
 
 export type PlanningRules = {
   earliestWorkTime?: string;
@@ -34,12 +124,19 @@ export type ExtractedTask = {
   title: string;
   description?: string;
   taskType: TaskType;
+  responsibilityKind?: ResponsibilityKind;
+  deadlineStrength?: DeadlineStrength;
+  /** App-derived classification; providers do not need to emit it. */
+  classification?: TaskClassification;
   dueDate?: string;
   dueTime?: string;
   dueAt?: string;
+  dueWindow?: TemporalWindow;
+  occurrenceWindow?: TemporalWindow;
   fixedStartAt?: string;
   fixedEndAt?: string;
   estimatedMinutes?: number;
+  durationRange?: DurationRange;
   effortEstimateSource?: "stated" | "ai" | "heuristic";
   effortEstimateRationale?: string;
   priority: TaskPriority;
@@ -48,10 +145,20 @@ export type ExtractedTask = {
   splittable: boolean;
   minimumSessionMinutes?: number;
   schedulingConstraints?: {
+    /** Independent calculated snapshot, with no parent/task references. */
+    calculatedTiming?: {
+      approximate: boolean;
+      durationEstimated: boolean;
+      buffer?: TimeInterval;
+    };
+    linkedTiming?: LinkedTiming;
     allowedTimeWindows?: ClockWindow[];
+    allowedDateWindows?: TemporalWindow[];
     preferredTimeWindows?: ClockWindow[];
+    preferredDateWindows?: TemporalWindow[];
     avoidConsecutiveDays?: boolean;
     sessionCount?: number;
+    maximumSessionMinutes?: number;
   };
   sequence?: {
     groupId: string;
@@ -110,6 +217,12 @@ export type ExtractedTask = {
   };
   missingInformation: string[];
   sourceText: string;
+  sourceSpan?: SourceEvidenceSpan;
+  /** App-owned reference to the original file stored in this browser. */
+  sourceDocument?: { id: string; name: string; pages: number[] };
+  fieldProvenance?: FieldProvenance[];
+  dependencies?: TaskDependency[];
+  conditionalRules?: ConditionalRule[];
   approved?: boolean;
   reviewRequired?: boolean;
   completed?: boolean;
@@ -128,20 +241,22 @@ export type ExtractionResult = {
   tasks: ExtractedTask[];
   ignoredStatements: IgnoredStatement[];
   planningRules?: PlanningRules;
+  interpretation?: InterpretationTrace;
 };
 
 export type ExtractionInput = {
+  /** User-authored instructions for this import only. */
+  globalInstructions?: string;
+  /** Explicit opt-in for GLOBAL: lines in pasted source; false for documents. */
+  allowInlineGlobalInstructions?: boolean;
   text: string;
   currentLocalDate: string;
   timeZone: string;
   sourceId?: string;
   /** Internal formatting evidence for the AI extractor. Never part of sourceText. */
   structureHint?: string;
-};
-
-export type TimeInterval = {
-  start: string;
-  end: string;
+  /** Request-scoped cancellation for server-side provider calls. */
+  signal?: AbortSignal;
 };
 
 export type PlanningMode = "conservative" | "balanced" | "aggressive";

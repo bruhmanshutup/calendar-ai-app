@@ -1,5 +1,6 @@
 import type { ExtractionInput, ExtractionResult } from "@/lib/domain/types";
 import { isExplicitDayAgenda } from "./day-agenda";
+import { parseStructuredLearningPlan } from "./structured-plan-recovery";
 
 const COMPLEX_SCHEDULING_LANGUAGE =
   /\b(?:after that|before that|beforehand|once (?:that|this) is done|and then|but (?:i|we) also|so (?:i|we) need|depends? on|prerequisite|split (?:it|this|that)?\s*(?:into|across|over)|sessions? (?:across|over)|avoid consecutive|back-to-back|if possible|i(?:'|’)d rather|i (?:would )?prefer|only open|business hours|do not schedule|don(?:'|’)t schedule|keep .{0,30} free|wake up|go to sleep)\b/i;
@@ -16,16 +17,25 @@ function actionCueCount(value: string): number {
 }
 
 /**
- * Keeps common, deterministic imports off the network while reserving an AI
- * provider for prose where relationships or scheduling nuance can change the
- * interpretation materially.
+ * Estimates whether a local fallback is straightforward enough to remain
+ * immediately usable. This must never be used to bypass a configured semantic
+ * provider; the hybrid pipeline always calls that provider first.
  */
-export function shouldUseFastLocalExtraction(
+export function isStraightforwardLocalExtraction(
   input: ExtractionInput,
   local: ExtractionResult,
 ): boolean {
-  if (local.tasks.length === 0 || input.text.length > 20_000) return false;
-  if (isExplicitDayAgenda(input.text)) return true;
+  if (local.tasks.length === 0) return false;
+  // These two formats carry their scheduling structure explicitly. Their
+  // deterministic recovery is safer than blanket-reviewing every row merely
+  // because a long AI request timed out.
+  if (
+    isExplicitDayAgenda(input.text) ||
+    Boolean(parseStructuredLearningPlan(input.text))
+  ) {
+    return true;
+  }
+  if (input.text.length > 20_000) return false;
   if (COMPLEX_SCHEDULING_LANGUAGE.test(input.text)) return false;
   if (
     local.tasks.some((task) =>
@@ -46,3 +56,6 @@ export function shouldUseFastLocalExtraction(
 
   return true;
 }
+
+/** @deprecated Use only as a backward-compatible alias in legacy tests/callers. */
+export const shouldUseFastLocalExtraction = isStraightforwardLocalExtraction;

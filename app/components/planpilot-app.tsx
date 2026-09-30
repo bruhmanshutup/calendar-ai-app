@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { fromZonedTime } from "date-fns-tz";
 import {
   AlertTriangle,
   ArrowRight,
@@ -13,7 +14,7 @@ import {
   ChevronUp,
   CircleHelp,
   Clock3,
-  Cloud,
+  Download,
   FileText,
   History,
   Home,
@@ -53,7 +54,13 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import packageJson from "@/package.json";
 import { DEFAULT_PREFERENCES } from "@/lib/defaults";
+import { extractionFallbackNotice } from "@/lib/domain/extraction-diagnostics";
+import {
+  countImportWords,
+  MAX_AI_IMPORT_WORDS,
+} from "@/lib/domain/import-limits";
 import {
   deadlineUpdateFields,
   isManualPlacementAfterDeadline,
@@ -61,6 +68,10 @@ import {
   manualPlacementStart,
   taskDeadlineInstant,
 } from "@/lib/domain/manual-placement";
+import {
+  previewPlanAdjustment,
+  type PlanAdjustmentPreview,
+} from "@/lib/domain/plan-adjustment";
 import type {
   DayOfWeek,
   ExtractedTask,
@@ -69,6 +80,9 @@ import type {
   ScheduleReasonCode,
   UnschedulableTask,
 } from "@/lib/domain/types";
+import { DocumentImport, TaskDocumentSource } from "./document-import";
+import type { DocumentReference } from "@/lib/domain/document-import";
+import { prepareGlobalInstructions } from "@/lib/domain/global-instructions";
 import {
   DAYS_OF_WEEK,
   groupRecurrenceDaySchedules,
@@ -82,7 +96,12 @@ import {
   type TaskSchedulingPreference,
 } from "@/lib/domain/task-scheduling-preference";
 import { taskSequence } from "@/lib/domain/task-sequence";
-import { usePlanPilot } from "./planpilot-provider";
+import { taskFieldOrigin } from "@/lib/domain/task-provenance";
+import { arrivalBufferReservations } from "@/lib/domain/linked-timing";
+import {
+  extractionModeImportSummary,
+  usePlanPilot,
+} from "./planpilot-provider";
 
 export type PlanPilotView =
   | "landing"
@@ -281,7 +300,23 @@ function recurrenceSummary(task: ExtractedTask): string {
   return `${count} time${count === 1 ? "" : "s"} ${recurrence.frequency}`;
 }
 
-function taskTimingSummary(task: ExtractedTask): string | undefined {
+function preferredDateWindowSummary(task: ExtractedTask): string | undefined {
+  const windows = task.schedulingConstraints?.preferredDateWindows;
+  if (!windows?.length) return undefined;
+  return windows.map((window) => `${datedIntervalSummary(window.start, window.end)} · ${window.label} (suggested)`).join("; ");
+}
+
+function datedIntervalSummary(start: string, end: string): string {
+  const sameDate = localDateKey(new Date(start)) === localDateKey(new Date(end));
+  return sameDate
+    ? `${formatDay(start, true)} · ${formatTime(start)}–${formatTime(end)}`
+    : `${formatDay(start, true)} at ${formatTime(start)} – ${formatDay(end, true)} at ${formatTime(end)}`;
+}
+
+function taskTimingSummary(
+  task: ExtractedTask,
+  includePreferredDateWindows = true,
+): string | undefined {
   const constraints = task.schedulingConstraints;
   if (!constraints) return undefined;
   const parts: string[] = [];
@@ -299,9 +334,27 @@ function taskTimingSummary(task: ExtractedTask): string | undefined {
         .join(", ")}`,
     );
   }
+  if (includePreferredDateWindows && constraints.preferredDateWindows?.length) {
+    parts.push(preferredDateWindowSummary(task)!);
+  }
   if (constraints.avoidConsecutiveDays) parts.push("Rest days when possible");
   if (constraints.sessionCount) parts.push(`${constraints.sessionCount} sessions`);
   return parts.join(" · ") || undefined;
+}
+
+function fixedTimeSummary(task: ExtractedTask): string {
+  if (!task.fixedStartAt) return "Start time needs review";
+
+  if (!task.fixedEndAt) {
+    return `${formatDay(task.fixedStartAt, true)} at ${formatTime(task.fixedStartAt)} · end time needed`;
+  }
+
+  return datedIntervalSummary(task.fixedStartAt, task.fixedEndAt);
+}
+
+function localDateTimeValue(value?: string): string {
+  if (!value) return "";
+  return `${localDateKey(new Date(value))}T${localTimeKey(value)}`;
 }
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -311,6 +364,9 @@ function Brand({ compact = false }: { compact?: boolean }) {
         <Waypoints size={compact ? 18 : 20} strokeWidth={2.3} />
       </span>
       <span className="brand-name">PlanPilot</span>
+      <span className="brand-version" title={`PlanPilot version ${packageJson.version}`}>
+        v{packageJson.version}
+      </span>
     </Link>
   );
 }
@@ -363,6 +419,34 @@ export function FieldConfidenceIndicator({
       <span aria-hidden="true" />
       {label}
       {tone === "low" ? " · check" : ""}
+    </span>
+  );
+}
+
+function FieldOriginBadge({
+  task,
+  path,
+}: {
+  task: ExtractedTask;
+  path: string;
+}) {
+  const origin = taskFieldOrigin(task, path);
+  if (!origin) return null;
+  const labels = {
+    explicit: "From text",
+    derived: "Calculated",
+    inferred: "Suggested",
+    user: "Your edit",
+  } as const;
+  const details = {
+    explicit: "Copied from the source you supplied.",
+    derived: "Calculated deterministically from source details.",
+    inferred: "A planning suggestion, not a supplied fact.",
+    user: "Changed by you after interpretation.",
+  } as const;
+  return (
+    <span className={`field-origin field-origin-${origin}`} title={task.fieldProvenance?.find((field) => field.path === path)?.rationale ?? details[origin]}>
+      {labels[origin]}
     </span>
   );
 }
@@ -1115,9 +1199,12 @@ function ImportView() {
   const {
     importText,
     setImportText,
+    setImportDocumentSource,
     importState,
     extractionMode,
+    extractionReport,
     importError,
+    interpretationTrace,
     analyzeText,
     tasks,
     lastImportedTaskIds,
@@ -1129,17 +1216,25 @@ function ImportView() {
   const latestReviewCount = latestImportedTasks.filter(
     (task) => task.reviewRequired,
   ).length;
-  const latestLocalEstimateCount = latestImportedTasks.filter(
-    (task) => task.effortEstimateSource === "heuristic",
-  ).length;
-  const [tab, setTab] = useState<"paste" | "txt">("paste");
+  const fallbackNotice = extractionFallbackNotice(extractionReport);
+  const importWordCount = countImportWords(importText);
+  const importIsOverLimit = importWordCount > MAX_AI_IMPORT_WORDS;
+  const [tab, setTab] = useState<"paste" | "txt" | "document">("paste");
+  const [documentBusy, setDocumentBusy] = useState(false);
+  const [globalInstructions, setGlobalInstructions] = useState("");
+  const [allowInlineGlobals, setAllowInlineGlobals] = useState(false);
+  const detectedGlobals = prepareGlobalInstructions({ text: importText, globalInstructions,
+    allowInlineGlobalInstructions: tab === "paste" && allowInlineGlobals,
+    currentLocalDate: "", timeZone: "" }).rules;
   const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     if (!file.name.toLocaleLowerCase().endsWith(".txt")) {
       setImportText("");
+      setImportDocumentSource(undefined);
       return;
     }
+    setImportDocumentSource(undefined);
     setImportText(await file.text());
   };
   return (
@@ -1152,11 +1247,14 @@ function ImportView() {
       <div className="import-layout">
         <section className="panel import-panel">
           <div className="tab-list" role="tablist">
-            <button className={tab === "paste" ? "active" : ""} onClick={() => setTab("paste")} role="tab">
+            <button className={tab === "paste" ? "active" : ""} onClick={() => { setTab("paste"); setImportDocumentSource(undefined); }} role="tab">
               <FileText size={16} /> Paste text
             </button>
-            <button className={tab === "txt" ? "active" : ""} onClick={() => setTab("txt")} role="tab">
+            <button className={tab === "txt" ? "active" : ""} onClick={() => { setTab("txt"); setImportDocumentSource(undefined); }} role="tab">
               <Upload size={16} /> TXT file
+            </button>
+            <button className={tab === "document" ? "active" : ""} onClick={() => setTab("document")} role="tab">
+              <FileText size={16} /> PDF or image
             </button>
           </div>
           {tab === "paste" ? (
@@ -1164,27 +1262,64 @@ function ImportView() {
               Source text
               <textarea
                 value={importText}
-                onChange={(event) => setImportText(event.target.value)}
+                onChange={(event) => { setImportDocumentSource(undefined); setImportText(event.target.value); }}
                 placeholder="Paste an assignment sheet, email, or checklist…"
               />
-              <span>{importText.length.toLocaleString()} characters · Your text remains editable if extraction fails.</span>
             </label>
-          ) : (
+          ) : tab === "txt" ? (
             <label className="file-drop">
               <Upload size={25} />
               <strong>Choose a TXT file</strong>
               <span>Plain text only · up to 100 KB</span>
               <input type="file" accept=".txt,text/plain" onChange={handleFile} />
             </label>
-          )}
-          <div className="future-formats">
-            <span>More formats</span>
-            <button disabled title="PDF extraction is a future capability"><FileText size={15} /> PDF <Badge>Coming later</Badge></button>
-            <button disabled title="Image OCR is a future capability"><Upload size={15} /> Image or screenshot <Badge>Coming later</Badge></button>
+          ) : <><DocumentImport
+            disabled={importState === "loading" || documentBusy}
+            onBusy={setDocumentBusy}
+            onReset={() => { setImportText(""); setImportDocumentSource(undefined); }}
+            onReady={(text, source: DocumentReference) => {
+              setImportText(text);
+              setImportDocumentSource(source);
+            }}
+          />
+          <label className="textarea-label">
+            Document transcript · review and correct before interpreting
+            <textarea value={importText} disabled={documentBusy || importState === "loading"}
+              onChange={(event) => setImportText(event.target.value)}
+              placeholder="Read a document to see its transcript here…" />
+          </label></>}
+          <div
+            className={`import-word-counter ${importIsOverLimit ? "over-limit" : ""}`}
+            role={importIsOverLimit ? "alert" : undefined}
+          >
+            <span>{importWordCount.toLocaleString()} / {MAX_AI_IMPORT_WORDS.toLocaleString()} words</span>
+            <small>
+              {importIsOverLimit
+                ? "Split this into smaller sections before interpreting."
+                : "Dense-plan safety limit."}
+            </small>
           </div>
+          {tab !== "document" && <div className="future-formats">
+            <span>More formats</span>
+            <button type="button" onClick={() => setTab("document")}><FileText size={15} /> PDF or image <Badge>Read and review</Badge></button>
+          </div>}
+          <details className="global-import-instructions">
+            <summary>Global instructions for this import</summary>
+            <label className="textarea-label">Your instructions
+              <textarea value={globalInstructions} maxLength={4000} disabled={importState === "loading" || documentBusy}
+                onChange={(event) => setGlobalInstructions(event.target.value)}
+                placeholder="Focus on required assignments and exams. Ignore optional events. Keep original deadlines." />
+            </label>
+            {tab === "paste" && <label><input type="checkbox" checked={allowInlineGlobals}
+              disabled={importState === "loading"} onChange={(event) => setAllowInlineGlobals(event.target.checked)} />
+              Treat GLOBAL: lines in my pasted text as my instructions
+            </label>}
+            <p>Filters apply to this import. Scheduling rules can update plan availability. For PDFs, images, and emails, write your instructions here; document text is source material.</p>
+            {detectedGlobals.length > 0 && <ul aria-label="Detected global instructions">{detectedGlobals.map((rule, index) => <li key={index}>{rule}</li>)}</ul>}
+          </details>
           <div className="import-actions">
             <p><ShieldCheck size={16} /> Dates and times are never guessed when absent.</p>
-            <Button size="lg" onClick={analyzeText} disabled={!importText.trim() || importState === "loading"}>
+            <Button size="lg" onClick={() => analyzeText({ globalInstructions, allowInlineGlobalInstructions: tab === "paste" && allowInlineGlobals })} disabled={!importText.trim() || importIsOverLimit || importState === "loading" || documentBusy}>
               {importState === "loading" ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />}
               Interpret responsibilities
             </Button>
@@ -1211,26 +1346,63 @@ function ImportView() {
       </div>
       <div className="import-state">
         {importState === "loading" && <LoadingState />}
-        {importState === "error" && importError && <ErrorState message={importError} onRetry={analyzeText} />}
+        {importState === "error" && importError && <ErrorState message={importError} onRetry={() => analyzeText({ globalInstructions, allowInlineGlobalInstructions: tab === "paste" && allowInlineGlobals })} />}
         {importState === "success" && (
-          <div className="state-card state-success">
-            <CheckCircle2 size={20} />
-            <div>
-              <strong>
-                {latestImportedTasks.length} {latestImportedTasks.length === 1 ? "responsibility" : "responsibilities"} interpreted this time
-              </strong>
-              <p>
-                {latestReviewCount} need a quick review before scheduling. {" "}
-                {extractionMode === "gemini" || extractionMode === "openai"
-                  ? latestLocalEstimateCount > 0
-                    ? `${extractionMode === "gemini" ? "Gemini" : "OpenAI"} interpreted the list; ${latestLocalEstimateCount} ${latestLocalEstimateCount === 1 ? "item used a" : "items used"} fast local fallback estimate${latestLocalEstimateCount === 1 ? "" : "s"}.`
-                    : `Effort and useful session length were estimated by ${extractionMode === "gemini" ? "Gemini" : "OpenAI"}.`
-                  : extractionMode === "fast-local"
-                    ? "A fast local interpretation avoided a network wait; uncertain estimates are highlighted."
-                  : "Local estimates were used because AI is not connected."}
-              </p>
+          <div className="import-success-stack">
+            {fallbackNotice && (
+              <div className="state-card state-warning fallback-notice" role="alert">
+                <AlertTriangle size={20} />
+                <div>
+                  <strong>{fallbackNotice.title}</strong>
+                  <p>{fallbackNotice.detail}</p>
+                  <p className="fallback-action">{fallbackNotice.action}</p>
+                </div>
+              </div>
+            )}
+            <div className="state-card state-success">
+              <CheckCircle2 size={20} />
+              <div>
+                <strong>
+                  {latestImportedTasks.length} {latestImportedTasks.length === 1 ? "responsibility" : "responsibilities"} interpreted this time
+                </strong>
+                <p>
+                  {latestReviewCount > 0
+                    ? `${latestReviewCount} need a quick review before scheduling. Confirm the highlighted dates, times, and other uncertain fields.`
+                    : "Everything interpreted this time is ready to schedule."}
+                </p>
+                <p>{extractionModeImportSummary(extractionMode)}</p>
+              </div>
+              <Link className="button button-primary button-sm" href="/tasks/review">Review tasks <ArrowRight size={14} /></Link>
             </div>
-            <Link className="button button-primary button-sm" href="/tasks/review">Review tasks <ArrowRight size={14} /></Link>
+            {interpretationTrace && (
+              <section className="interpretation-stages" aria-label="Interpretation stages">
+                <div>
+                  <span>1</span>
+                  <p><strong>Discovered work</strong>{interpretationTrace.discoveredResponsibilityCount} exact source {interpretationTrace.discoveredResponsibilityCount === 1 ? "span" : "spans"}</p>
+                </div>
+                <ArrowRight size={14} />
+                <div>
+                  <span>2</span>
+                  <p><strong>Attached facts</strong>{interpretationTrace.explicitFieldCount} supplied · {interpretationTrace.derivedFieldCount} resolved</p>
+                </div>
+                <ArrowRight size={14} />
+                <div>
+                  <span>3</span>
+                  <p><strong>Added suggestions</strong>{interpretationTrace.inferredFieldCount} planning-only fields</p>
+                </div>
+                {interpretationTrace.globalInstructions.length > 0 && (
+                  <details>
+                    <summary>{interpretationTrace.globalInstructions.length} global {interpretationTrace.globalInstructions.length === 1 ? "instruction" : "instructions"} sent to the interpreter</summary>
+                    <ul>{interpretationTrace.globalInstructions.map((span, index) => <li key={index}>{span.quote}</li>)}</ul>
+                  </details>
+                )}
+                {interpretationTrace.validationWarnings.length > 0 && (
+                  <Badge tone="warning">
+                    {interpretationTrace.validationWarnings.length} validation {interpretationTrace.validationWarnings.length === 1 ? "note" : "notes"}
+                  </Badge>
+                )}
+              </section>
+            )}
           </div>
         )}
       </div>
@@ -1239,10 +1411,26 @@ function ImportView() {
 }
 
 export function TaskReviewCard({ task }: { task: ExtractedTask }) {
-  const { updateTask, approveTask, deleteTask } = usePlanPilot();
+  const { tasks = [], updateTask, approveTask, deleteTask } = usePlanPilot();
+  const linkedTiming = task.schedulingConstraints?.linkedTiming;
+  const calculatedTiming = task.schedulingConstraints?.calculatedTiming;
+  const arrivalBuffer = arrivalBufferReservations(tasks, true).find((item) => item.taskId === task.id);
   const [expanded, setExpanded] = useState(task.reviewRequired ?? false);
   const [addingTimeFor, setAddingTimeFor] = useState<DayOfWeek>();
-  const timingSummary = taskTimingSummary(task);
+  const visibleMissingInformation = task.missingInformation.filter(
+    (item) => !/^choose (?:a )?(?:plan )?start date$/i.test(item.trim()),
+  );
+  const preferredDateSummary = preferredDateWindowSummary(task);
+  const relationshipDetails = task.fieldProvenance?.filter((field) => field.path.startsWith("relationships.")) ?? [];
+  const hasDeadline = Boolean(task.dueDate || task.dueTime || task.dueWindow);
+  const timingSummary = taskTimingSummary(
+    task,
+    hasDeadline || !preferredDateSummary,
+  );
+  const effortIsPlanningEstimate =
+    task.effortEstimateSource === "ai" ||
+    task.effortEstimateSource === "heuristic" ||
+    taskFieldOrigin(task, "estimatedMinutes") === "inferred";
   const schedulingPreference = taskSchedulingPreference(task);
   const customPreferenceWindow =
     task.schedulingConstraints?.preferredTimeWindows?.[0] ?? {
@@ -1256,6 +1444,62 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
           `${formatClockTime(window.start)}–${formatClockTime(window.end)}`,
       )
       .join(", ");
+  const updateFixedStartAt = (value: string) => {
+    if (!value) {
+      updateTask(task.id ?? "", {
+        fixedStartAt: undefined,
+        fixedEndAt: undefined,
+      });
+      return;
+    }
+
+    const fixedStartAt = fromZonedTime(
+      value,
+      DEFAULT_PREFERENCES.timeZone,
+    ).toISOString();
+    let fixedEndAt = task.fixedEndAt;
+    if (task.fixedStartAt && task.fixedEndAt) {
+      const duration =
+        new Date(task.fixedEndAt).getTime() -
+        new Date(task.fixedStartAt).getTime();
+      if (duration > 0) {
+        fixedEndAt = new Date(
+          new Date(fixedStartAt).getTime() + duration,
+        ).toISOString();
+      }
+    } else if (
+      fixedEndAt &&
+      new Date(fixedEndAt).getTime() <= new Date(fixedStartAt).getTime()
+    ) {
+      fixedEndAt = undefined;
+    }
+    updateTask(task.id ?? "", {
+      fixedStartAt,
+      fixedEndAt,
+      dueDate: undefined,
+      dueTime: undefined,
+      dueAt: undefined,
+      dueWindow: undefined,
+    });
+  };
+  const updateFixedEndAt = (value: string) => {
+    if (!value) {
+      updateTask(task.id ?? "", { fixedEndAt: undefined });
+      return;
+    }
+
+    const fixedEndAt = fromZonedTime(
+      value,
+      DEFAULT_PREFERENCES.timeZone,
+    ).toISOString();
+    if (
+      task.fixedStartAt &&
+      new Date(fixedEndAt).getTime() <= new Date(task.fixedStartAt).getTime()
+    ) {
+      return;
+    }
+    updateTask(task.id ?? "", { fixedEndAt });
+  };
   const saveRecurringSchedules = (
     schedules: Partial<Record<DayOfWeek, string[]>>,
   ) => {
@@ -1313,6 +1557,9 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
               {task.reviewRequired ? "Review needed" : "Ready to schedule"}
             </Badge>
             <Badge>{task.taskType.replace("_", " ")}</Badge>
+            {linkedTiming && <Badge>Calculated · linked</Badge>}
+            {calculatedTiming && <Badge>Calculated · independent</Badge>}
+            {(linkedTiming?.approximate || calculatedTiming?.approximate) && <Badge>Estimated timing</Badge>}
           </div>
           <input
             className="task-title-input"
@@ -1321,6 +1568,7 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
             onChange={(event) => updateTask(task.id ?? "", { title: event.target.value })}
           />
           <FieldConfidenceIndicator label="Title" confidence={task.fieldConfidence.title} />
+          <FieldOriginBadge task={task} path="title" />
         </div>
         <button className="icon-button" onClick={() => setExpanded(!expanded)} aria-label={expanded ? "Collapse task" : "Edit task"}>
           <PencilLine size={17} />
@@ -1330,57 +1578,156 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
         </button>
       </div>
       <div className="source-quote">
-        <span>From your source</span>
-        <p>“{task.sourceText}”</p>
+        <span>
+          {task.sourceSpan
+            ? `Exact source · characters ${task.sourceSpan.start}–${task.sourceSpan.end}`
+            : "From your source"}
+        </span>
+        <p>“{task.sourceSpan?.quote ?? task.sourceText}”</p>
+        {task.dependencies?.length ? (
+          <small>
+            {task.dependencies
+              .map((dependency) =>
+                dependency.relation === "before"
+                  ? "Must come before related work"
+                  : "Follows related work",
+              )
+              .join(" · ")}
+          </small>
+        ) : null}
       </div>
+      {task.sourceDocument && <TaskDocumentSource source={task.sourceDocument} />}
+      {relationshipDetails.length > 0 && (
+        <div className="source-quote" aria-label="Relationship interpretation">
+          <span>{task.reviewRequired ? "AI interpretation · needs review" : "Relationship interpretation"}</span>
+          {relationshipDetails.map((field, index) => (
+            <div key={`${field.path}-${index}`}>
+              <p>{field.rationale}</p>
+              {field.evidence?.map((span) => <small key={`${span.start}-${span.end}`}>Source: “{span.quote}”</small>)}
+            </div>
+          ))}
+          <small>Quote presence and arithmetic are checked. Confirm that the AI connected the right activities and interpreted the timing correctly.</small>
+        </div>
+      )}
+      {linkedTiming && (
+        <p className="source-quote">Updates with the related event. Editing this card’s date/time makes it independent.</p>
+      )}
+      {calculatedTiming && (
+        <p className="source-quote">AI interpreted the relationship; the calculator filled in these times without relationship validation. This is an independent task. Changes to other events will not move it.</p>
+      )}
+      {visibleMissingInformation.length > 0 && (
+        <div className="review-focus" role="note">
+          <AlertTriangle size={15} />
+          <div>
+            <strong>Check before scheduling</strong>
+            <div className="missing-row">
+              {visibleMissingInformation.map((item) => (
+                <Badge tone="warning" key={item}>{item}</Badge>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       <div className="task-field-summary">
-        {task.recurrence?.mode === "fixed_times" ? (
+        {task.taskType === "fixed_time" ? (
+          <div>
+            <span>{task.reviewRequired ? "Proposed event time" : "Scheduled event"}</span>
+            <strong>{fixedTimeSummary(task)}</strong>
+            <FieldOriginBadge task={task} path="fixedStartAt" />
+            <FieldOriginBadge task={task} path="fixedEndAt" />
+          </div>
+        ) : task.recurrence?.mode === "fixed_times" ? (
           <div>
             <span>Recurring schedule</span>
             <strong>{recurrenceSummary(task)}</strong>
             <FieldConfidenceIndicator label="Recurrence" confidence={task.fieldConfidence.recurrence} />
+            <FieldOriginBadge task={task} path="recurrence" />
+          </div>
+        ) : hasDeadline ? (
+          <div>
+            <span>{task.responsibilityKind === "milestone" ? (task.reviewRequired ? "Proposed checkpoint" : "Checkpoint") : "Deadline"}</span>
+            <strong>
+              {task.dueWindow
+                ? `${shortDate(
+                    task.dueDate ?? localDateKey(new Date(task.dueWindow.start)),
+                  )} · ${task.dueWindow.label}`
+                : task.dueDate
+                  ? `${shortDate(task.dueDate)}${task.dueTime ? ` at ${formatClockTime(task.dueTime)}` : " · time not specified"}`
+                  : task.dueTime
+                    ? `${formatClockTime(task.dueTime)} · date needs confirmation`
+                    : "Not specified"}
+            </strong>
+            <FieldConfidenceIndicator label="Deadline" confidence={task.fieldConfidence.dueDate} />
+            <FieldOriginBadge task={task} path="dueDate" />
+            {task.dueTime && <FieldOriginBadge task={task} path="dueTime" />}
+            {task.dueWindow && <FieldOriginBadge task={task} path="dueWindow" />}
+          </div>
+        ) : preferredDateSummary ? (
+          <div>
+            <span>{relationshipDetails.length ? "Calculated start and finish (suggested)" : "Preferred work time"}</span>
+            <strong>{preferredDateSummary}</strong>
+            <FieldOriginBadge
+              task={task}
+              path="schedulingConstraints.preferredDateWindows"
+            />
+          </div>
+        ) : task.occurrenceWindow ? (
+          <div>
+            <span>Event date · time needs review</span>
+            <strong>{formatDay(task.occurrenceWindow.start, true)} · {task.occurrenceWindow.label}</strong>
           </div>
         ) : (
           <div>
-            <span>Deadline</span>
-            <strong>{task.dueDate ? `${shortDate(task.dueDate)}${task.dueTime ? ` at ${task.dueTime}` : " · time not specified"}` : "Not specified"}</strong>
-            <FieldConfidenceIndicator label="Deadline" confidence={task.fieldConfidence.dueDate} />
+            <span>No deadline</span>
+            <strong>Not specified</strong>
           </div>
         )}
-        <div>
-          <span>Effort</span>
-          <strong>{task.estimatedMinutes ? `${task.estimatedMinutes} minutes` : "Not estimated"}</strong>
-          {task.effortEstimateSource && (
-            <Badge tone={task.effortEstimateSource === "ai" ? "success" : "neutral"}>
-              {task.effortEstimateSource === "ai"
-                ? "AI estimate"
-                : task.effortEstimateSource === "stated"
-                  ? "Stated duration"
-                  : "Local estimate"}
-            </Badge>
-          )}
-          {task.effortEstimateRationale && <p>{task.effortEstimateRationale}</p>}
-          <FieldConfidenceIndicator label="Effort" confidence={task.fieldConfidence.estimatedMinutes} />
+        {arrivalBuffer && (
+          <div><span>Reserved arrival buffer · not active work</span><strong>{datedIntervalSummary(arrivalBuffer.start, arrivalBuffer.end)}</strong></div>
+        )}
+        <div
+          className={effortIsPlanningEstimate ? "task-field-secondary" : undefined}
+          title={
+            effortIsPlanningEstimate
+              ? "This is a planning suggestion, not a duration supplied in the source."
+              : undefined
+          }
+        >
+          <span>{effortIsPlanningEstimate ? "Suggested duration" : "Duration"}</span>
+          <strong>{task.responsibilityKind === "milestone" ? "Checkpoint · no active work" : task.estimatedMinutes ? `${task.estimatedMinutes} minutes` : "Not estimated"}</strong>
+          <FieldOriginBadge task={task} path="estimatedMinutes" />
         </div>
         <div>
           <span>Priority</span>
           <strong className="capitalize">{task.priority}</strong>
           <FieldConfidenceIndicator label="Priority" confidence={task.fieldConfidence.priority} />
+          <FieldOriginBadge task={task} path="priority" />
         </div>
         <div>
           <span>Energy</span>
           <strong className="capitalize">{task.energyDemand}</strong>
+          <FieldOriginBadge task={task} path="energyDemand" />
         </div>
         {timingSummary && (
           <div>
             <span>Scheduling</span>
             <strong>{timingSummary}</strong>
+            {task.schedulingConstraints?.preferredDateWindows?.length ? (
+              <FieldOriginBadge
+                task={task}
+                path="schedulingConstraints.preferredDateWindows"
+              />
+            ) : (
+              <FieldOriginBadge task={task} path="schedulingConstraints" />
+            )}
           </div>
         )}
       </div>
       <div className="task-preference-editor">
         <label>
-          Scheduling preference <span>(optional)</span>
+          {preferredDateSummary
+            ? "Additional time-of-day preference"
+            : "Scheduling preference"} <span>(optional)</span>
           <select
             aria-label={`Scheduling preference for ${task.title}`}
             disabled={schedulingPreference === "fixed"}
@@ -1410,7 +1757,9 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
             )}
             {TASK_SCHEDULING_PREFERENCE_OPTIONS.map((option) => (
               <option value={option.value} key={option.value}>
-                {option.label}
+                {option.value === "none" && preferredDateSummary
+                  ? `Keep ${preferredDateSummary}`
+                  : option.label}
               </option>
             ))}
           </select>
@@ -1453,23 +1802,26 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
         )}
         <p>
           {schedulingPreference === "fixed"
-            ? "This task already has an exact scheduled time."
+            ? (task.reviewRequired ? "This activity has a proposed fixed time; confirm it before scheduling." : "This activity has a fixed scheduled time.")
             : schedulingPreference === "interpreted_required"
               ? "This required window came from the source. Choosing another option adds a soft preference without removing it."
               : "A soft preference: deadlines and hard availability still come first."}
         </p>
       </div>
-      {task.dueDate && !task.dueTime && (
+      {task.dueWindow ? (
+        <div className="assumption-note">
+          <Info size={15} />
+          <span>
+            <strong>Named-period deadline:</strong> no exact clock time was
+            stated. Planning conservatively finishes by the start of {task.dueWindow.label}.
+          </span>
+        </div>
+      ) : task.dueDate && !task.dueTime ? (
         <div className="assumption-note">
           <Info size={15} />
           <span><strong>Planning assumption only:</strong> feasibility uses the end of your waking day. No due time will be saved.</span>
         </div>
-      )}
-      {task.missingInformation.length > 0 && (
-        <div className="missing-row">
-          {task.missingInformation.map((item) => <Badge tone="warning" key={item}>{item}</Badge>)}
-        </div>
-      )}
+      ) : null}
       {expanded && (
         <div className="task-edit-grid">
           <label>
@@ -1478,11 +1830,33 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
               value={task.taskType}
               onChange={(event) => {
                 const taskType = event.target.value as ExtractedTask["taskType"];
-                updateTask(task.id ?? "", {
-                  taskType,
-                  recurrence:
-                    taskType === "recurring_goal" ? task.recurrence : undefined,
-                });
+                const otherConstraints = { ...task.schedulingConstraints };
+                delete otherConstraints.preferredDateWindows;
+                updateTask(
+                  task.id ?? "",
+                  taskType === "fixed_time"
+                    ? {
+                        taskType,
+                        recurrence: undefined,
+                        dueDate: undefined,
+                        dueTime: undefined,
+                        dueAt: undefined,
+                        dueWindow: undefined,
+                        schedulingConstraints:
+                          Object.keys(otherConstraints).length > 0
+                            ? otherConstraints
+                            : undefined,
+                      }
+                    : {
+                        taskType,
+                        recurrence:
+                          taskType === "recurring_goal"
+                            ? task.recurrence
+                            : undefined,
+                        fixedStartAt: undefined,
+                        fixedEndAt: undefined,
+                      },
+                );
               }}
             >
               <option value="flexible">Flexible work</option>
@@ -1512,46 +1886,81 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
               />
             </label>
           )}
-          <label>
-            Due date
-            <input
-              type="date"
-              value={task.dueDate ?? ""}
-              onChange={(event) => {
-                const dueDate = event.target.value;
-                updateTask(
-                  task.id ?? "",
-                  dueDate
-                    ? deadlineUpdateFields(
-                        { dueDate, dueTime: task.dueTime },
-                        DEFAULT_PREFERENCES.timeZone,
-                      )
-                    : { dueDate: undefined, dueTime: undefined, dueAt: undefined },
-                );
-              }}
-            />
-          </label>
-          <label>
-            Due time
-            <input
-              type="time"
-              value={task.dueTime ?? ""}
-              disabled={!task.dueDate}
-              onChange={(event) => {
-                if (!task.dueDate) return;
-                updateTask(
-                  task.id ?? "",
-                  deadlineUpdateFields(
-                    {
-                      dueDate: task.dueDate,
-                      dueTime: event.target.value || undefined,
-                    },
-                    DEFAULT_PREFERENCES.timeZone,
-                  ),
-                );
-              }}
-            />
-          </label>
+          {task.taskType === "fixed_time" ? (
+            <>
+              <label>
+                Fixed start
+                <input
+                  type="datetime-local"
+                  value={localDateTimeValue(task.fixedStartAt)}
+                  onChange={(event) => updateFixedStartAt(event.target.value)}
+                />
+              </label>
+              <label>
+                Fixed end
+                <input
+                  type="datetime-local"
+                  min={localDateTimeValue(task.fixedStartAt) || undefined}
+                  value={localDateTimeValue(task.fixedEndAt)}
+                  onChange={(event) => updateFixedEndAt(event.target.value)}
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label>
+                Due date
+                <input
+                  type="date"
+                  value={task.dueDate ?? ""}
+                  onChange={(event) => {
+                    const dueDate = event.target.value;
+                    updateTask(
+                      task.id ?? "",
+                      dueDate
+                        ? {
+                            ...deadlineUpdateFields(
+                              { dueDate, dueTime: task.dueTime },
+                              DEFAULT_PREFERENCES.timeZone,
+                            ),
+                            dueWindow: undefined,
+                          }
+                        : {
+                            dueDate: undefined,
+                            dueTime: undefined,
+                            dueAt: undefined,
+                            dueWindow: undefined,
+                          },
+                    );
+                  }}
+                />
+              </label>
+              <label>
+                Due time
+                <input
+                  type="time"
+                  value={task.dueTime ?? ""}
+                  disabled={!task.dueDate}
+                  onChange={(event) => {
+                    if (!task.dueDate) return;
+                    updateTask(
+                      task.id ?? "",
+                      {
+                        ...deadlineUpdateFields(
+                          {
+                            dueDate: task.dueDate,
+                            dueTime: event.target.value || undefined,
+                          },
+                          DEFAULT_PREFERENCES.timeZone,
+                        ),
+                        dueWindow: undefined,
+                      },
+                    );
+                  }}
+                />
+              </label>
+            </>
+          )}
           <label>
             Estimated minutes
             <input type="number" min={1} max={1440} value={task.estimatedMinutes ?? ""} onChange={(event) => updateTask(task.id ?? "", { estimatedMinutes: Number(event.target.value) || undefined })} />
@@ -1681,6 +2090,130 @@ export function TaskReviewCard({ task }: { task: ExtractedTask }) {
   );
 }
 
+function planDateLabel(value?: string | null): string {
+  if (!value) return "Not set";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(`${value}T12:00:00Z`));
+}
+
+function SequencePlanControl({ planTasks }: { planTasks: ExtractedTask[] }) {
+  const { setSequenceStartDate } = usePlanPilot();
+  const sequences = planTasks
+    .map((task) => taskSequence(task))
+    .filter((sequence) => sequence !== undefined);
+  const groupId = sequences[0]?.groupId;
+  const anchors = [...new Set(sequences.map((sequence) => sequence.anchorDate).filter(Boolean))];
+  const anchorDate = anchors.length === 1 ? anchors[0] : undefined;
+  const maxWeek = Math.max(0, ...sequences.map((sequence) => sequence.week ?? 0));
+  const [command, setCommand] = useState("");
+  const [preview, setPreview] = useState<PlanAdjustmentPreview>();
+
+  if (!groupId) return null;
+
+  const buildPreview = () => {
+    setPreview(
+      previewPlanAdjustment({
+        command,
+        tasks: planTasks,
+        currentLocalDate: localDateKey(),
+        timeZone: DEFAULT_PREFERENCES.timeZone,
+      }),
+    );
+  };
+  const applyPreview = () => {
+    if (!preview?.ok || !preview.groupId || !preview.newAnchor) return;
+    setSequenceStartDate(preview.groupId, preview.newAnchor);
+    setCommand("");
+    setPreview(undefined);
+  };
+
+  return (
+    <section className={`sequence-plan-panel ${anchorDate ? "" : "needs-start"}`}>
+      <div className="sequence-plan-heading">
+        <span className="sequence-plan-icon"><Waypoints size={18} /></span>
+        <div>
+          <strong>{maxWeek > 0 ? `${maxWeek}-week plan` : "Structured plan"}</strong>
+          <p>{planTasks.length} linked responsibilities · one shared start date</p>
+        </div>
+        <Badge tone={anchorDate ? "success" : "warning"}>
+          {anchorDate ? "Start resolved" : "Start needed"}
+        </Badge>
+      </div>
+      <div className="sequence-start-row">
+        <label>
+          Plan start · Week 1, Day 1
+          <input
+            type="date"
+            value={anchorDate ?? ""}
+            onChange={(event) => {
+              setPreview(undefined);
+              setSequenceStartDate(groupId, event.target.value || undefined);
+            }}
+          />
+        </label>
+        <div>
+          <strong>{planDateLabel(anchorDate)}</strong>
+          <p>
+            {anchorDate
+              ? "Every Week/Day item moves together from this anchor."
+              : "Choose this once; you do not need to edit each responsibility."}
+          </p>
+          <FieldOriginBadge task={planTasks[0]} path="sequence.anchorDate" />
+        </div>
+      </div>
+      <div className="plan-adjuster">
+        <div>
+          <span><Sparkles size={15} /></span>
+          <div>
+            <strong>Adjust this plan</strong>
+            <p>Describe one date change. Nothing moves until you preview and apply it.</p>
+          </div>
+        </div>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            buildPreview();
+          }}
+        >
+          <input
+            value={command}
+            onChange={(event) => {
+              setCommand(event.target.value);
+              setPreview(undefined);
+            }}
+            placeholder='Try “Shift this plan down one day”'
+            aria-label="Plan adjustment request"
+          />
+          <Button type="submit" variant="secondary" size="sm" disabled={!command.trim()}>
+            Preview
+          </Button>
+        </form>
+        {preview && (
+          preview.ok ? (
+            <div className="plan-adjustment-preview" role="status">
+              <div>
+                <span>Preview</span>
+                <strong>{planDateLabel(preview.oldAnchor)} <ArrowRight size={13} /> {planDateLabel(preview.newAnchor)}</strong>
+                <p>{preview.affectedTaskCount} linked responsibilities will move together.</p>
+              </div>
+              <Button size="sm" onClick={applyPreview}>Apply change</Button>
+            </div>
+          ) : (
+            <div className="plan-adjustment-error" role="alert">
+              <AlertTriangle size={14} /> {preview.errors[0]?.message}
+            </div>
+          )
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ReviewView() {
   const { tasks, approveTask, deleteTasks, lastImportedTaskIds, planningRules } = usePlanPilot();
   const latestIds = new Set(lastImportedTaskIds);
@@ -1699,7 +2232,25 @@ function ReviewView() {
   );
   const scopedTasks = filter === "recent" ? latestTasks : tasks;
   const reviewCount = scopedTasks.filter((task) => task.reviewRequired).length;
+  const approvableReviewTasks = scopedTasks.filter((task) => {
+    if (!task.reviewRequired) return false;
+    const sequence = taskSequence(task);
+    return !sequence || Boolean(sequence.anchorDate);
+  });
   const allReviewCount = tasks.filter((task) => task.reviewRequired).length;
+  const sequencePlanGroups = [
+    ...(filter === "recent" ? latestTasks : shown).reduce(
+      (groups, task) => {
+        const sequence = taskSequence(task);
+        if (!sequence) return groups;
+        const group = groups.get(sequence.groupId) ?? [];
+        group.push(task);
+        groups.set(sequence.groupId, group);
+        return groups;
+      },
+      new Map<string, ExtractedTask[]>(),
+    ).values(),
+  ];
   const clearLabel =
     filter === "recent"
       ? "Just added"
@@ -1754,8 +2305,8 @@ function ReviewView() {
         }
         actions={
           <Button
-            onClick={() => scopedTasks.filter((task) => task.reviewRequired).forEach((task) => approveTask(task.id ?? ""))}
-            disabled={reviewCount === 0}
+            onClick={() => approvableReviewTasks.forEach((task) => approveTask(task.id ?? ""))}
+            disabled={approvableReviewTasks.length === 0}
           >
             <Check size={16} /> Approve reviewed tasks
           </Button>
@@ -1771,6 +2322,16 @@ function ReviewView() {
           <span><i className="low" /> Review field</span>
         </div>
       </div>
+      {sequencePlanGroups.length > 0 && (
+        <div className="sequence-plan-list">
+          {sequencePlanGroups.map((planTasks) => (
+            <SequencePlanControl
+              key={taskSequence(planTasks[0])?.groupId}
+              planTasks={planTasks}
+            />
+          ))}
+        </div>
+      )}
       {(planningRules.earliestWorkTime ||
         planningRules.latestWorkTime ||
         planningRules.blockedTimes?.length) && (
@@ -1830,13 +2391,21 @@ function ReviewView() {
   );
 }
 
-export function UnschedulableTaskCard({ task }: { task: UnschedulableTask }) {
+export function UnschedulableTaskCard({ task, responsibility }: { task: UnschedulableTask; responsibility?: ExtractedTask }) {
+  const timing = responsibility && (
+    responsibility.fixedStartAt ? fixedTimeSummary(responsibility)
+      : preferredDateWindowSummary(responsibility)
+        ?? (responsibility.dueAt ? `${formatDay(responsibility.dueAt, true)} at ${formatTime(responsibility.dueAt)}`
+          : responsibility.occurrenceWindow ? `${formatDay(responsibility.occurrenceWindow.start, true)} · ${responsibility.occurrenceWindow.label}` : undefined)
+  );
   return (
     <article className="unschedulable-card">
       <span><AlertTriangle size={18} /></span>
       <div>
         <div><strong>{task.title}</strong><Badge tone="warning">{task.unscheduledMinutes} min unplaced</Badge></div>
         <p>{task.explanation}</p>
+        {timing && <p><strong>{responsibility?.reviewRequired ? "Proposed timing (needs review): " : "Task timing: "}</strong>{timing}</p>}
+        {responsibility?.reviewRequired && <Link href="/tasks/review">Review task timing <ArrowRight size={14} /></Link>}
         <ul>{task.suggestedActions.slice(0, 2).map((action) => <li key={action}>{action}</li>)}</ul>
       </div>
     </article>
@@ -1934,6 +2503,9 @@ export function ScheduleSessionCard({
         </button>
       </div>
       <h3>{session.title}</h3>
+      {task?.schedulingConstraints?.calculatedTiming && task.reviewRequired && session.status === "proposed" && (
+        <Badge tone="warning">Calculated · check timing</Badge>
+      )}
       <ScheduleReason
         reasons={session.reasonCodes}
         explanation={session.explanation}
@@ -2024,6 +2596,11 @@ function ScheduleView() {
   const visibleUnschedulable = proposal.unschedulable.filter(
     (task) => scope === "all" || latestTaskIds.has(task.taskId),
   );
+  const visibleCheckpoints = tasks.filter((task) =>
+    task.responsibilityKind === "milestone" && task.dueAt && !task.completed && !task.cancelled
+    && (scope === "all" || latestTaskIds.has(task.id ?? "")),
+  );
+  const arrivalBuffers = arrivalBufferReservations(tasks, true);
   const weekColumns = scheduleColumns(visibleSessions);
   const allReasonsExpanded =
     visibleSessions.length > 0 &&
@@ -2420,6 +2997,23 @@ function ScheduleView() {
         }
       />
       <PlanHealthPanel compact />
+      {visibleCheckpoints.length > 0 && (
+        <section className="panel" aria-label="Arrival and dependency checkpoints">
+          <div className="panel-heading"><div><h2>Arrival &amp; dependency checkpoints</h2><p>Point-in-time targets, not work blocks. Pending interpretations do not constrain the schedule until you confirm them.</p></div></div>
+          <div className="unschedulable-list">
+            {visibleCheckpoints.map((task) => (
+              <div className="source-quote" key={task.id}>
+                <span>{task.title} · {task.reviewRequired ? "Needs review" : "Confirmed checkpoint"}</span>
+                <p>{formatDay(task.dueAt!, true)} at {formatTime(task.dueAt!)}</p>
+                {arrivalBuffers.filter((buffer) => buffer.taskId === task.id).map((buffer) => (
+                  <p key={buffer.taskId}>Reserved arrival buffer: {datedIntervalSummary(buffer.start, buffer.end)} · not active work{task.reviewRequired ? " · needs review" : ""}</p>
+                ))}
+                <Link href="/tasks/review">Review timing and source</Link>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="schedule-toolbar">
         <div className="view-toggle">
           <button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}><CalendarDays size={15} /> Timeline</button>
@@ -2778,7 +3372,7 @@ function ScheduleView() {
         <section className="panel">
           <div className="panel-heading"><div><h2>Work that does not fit yet</h2><p>No tasks are quietly squeezed into invalid time.</p></div></div>
           <div className="unschedulable-list">
-            {visibleUnschedulable.map((task) => <UnschedulableTaskCard task={task} key={task.taskId} />)}
+            {visibleUnschedulable.map((task) => <UnschedulableTaskCard task={task} responsibility={tasks.find((item) => item.id === task.taskId)} key={task.taskId} />)}
             {visibleUnschedulable.length === 0 && (
               <p className="open-day">Everything in this view fits.</p>
             )}
@@ -2787,13 +3381,16 @@ function ScheduleView() {
         <section className="export-panel">
           <span><CalendarDays size={21} /></span>
           <div>
-            <Badge tone="info">Mock calendar</Badge>
-            <h2>Ready to export approved sessions?</h2>
-            <p>Only approved sessions are created. Imported events are never modified.</p>
-            <Button onClick={exportApprovedSessions} disabled={exportState === "loading"}>
-              {exportState === "loading" ? <RefreshCw className="spin" size={16} /> : <Cloud size={16} />}
-              Export approved
+            <Badge tone="info">Google Calendar</Badge>
+            <h2>Export your approved schedule</h2>
+            <p>Download all approved sessions in your plan as a calendar file (.ics), including sessions outside this view.</p>
+            <Button onClick={exportApprovedSessions} disabled={exportState === "loading" || !proposal.sessions.some((session) => session.status === "approved")}>
+              {exportState === "loading" ? <RefreshCw className="spin" size={16} /> : <Download size={16} />}
+              {exportState === "loading" ? "Preparing calendar…" : "Export to Google Calendar"}
             </Button>
+            <p>{proposal.sessions.filter((session) => session.status === "approved").length} approved sessions ready. Approve sessions above to include them.</p>
+            <p>On a computer, open Google Calendar → Settings → Import &amp; export. Select the downloaded file, choose your calendar, then click Import. <a href="https://support.google.com/calendar/answer/37118" target="_blank" rel="noreferrer">Import help</a></p>
+            <p>This is a one-time export. Later schedule changes do not sync automatically.</p>
           </div>
         </section>
       </div>
@@ -3100,14 +3697,14 @@ function SettingsView() {
             </div>
           </section>
           <section className="panel settings-section" id="calendar">
-            <div className="settings-heading"><span><CalendarDays size={19} /></span><div><h2>Google Calendar</h2><p>Read busy time and export approved PlanPilot sessions.</p></div></div>
+            <div className="settings-heading"><span><CalendarDays size={19} /></span><div><h2>Google Calendar</h2><p>Export approved sessions as a calendar file you can import.</p></div></div>
             <div className="connection-row">
               <div className="google-mark">G</div>
-              <div><strong>Google Calendar</strong><p>Not connected · Mock calendar is active</p></div>
-              <Badge>OAuth keys required</Badge>
-              <button disabled className="button button-secondary button-sm">Connect</button>
+              <div><strong>Google Calendar</strong><p>Calendar file export · No connection needed</p></div>
+              <Badge tone="success">Available</Badge>
+              <Link href="/schedule" className="button button-secondary button-sm">Open schedule</Link>
             </div>
-            <p className="settings-footnote"><ShieldCheck size={14} /> Production OAuth stays server-side, requests calendar event scope, and encrypts refresh tokens. Imported events are read-only.</p>
+            <p className="settings-footnote">Approve your sessions on Schedule, then choose Export to Google Calendar. On a computer, import the downloaded .ics file in Google Calendar → Settings → Import &amp; export. Automatic sync and reading Google busy time are not connected.</p>
           </section>
           <section className="panel settings-section" id="appearance">
             <div className="settings-heading"><span>{theme === "light" ? <Sun size={19} /> : <Moon size={19} />}</span><div><h2>Appearance</h2><p>High-contrast light and dark themes.</p></div></div>
@@ -3118,7 +3715,7 @@ function SettingsView() {
             <div className="data-action"><div><strong>Delete imported source text</strong><p>{importText ? "Current demo source is retained." : "No demo source text retained."}</p></div><Button variant="secondary" size="sm" onClick={() => confirmAction("Delete the imported source text? Normalized demo tasks will remain.", () => setImportText(""), "Imported source text deleted from this demo session.")}>Delete source</Button></div>
             <div className="data-action"><div><strong>Delete task history</strong><p>Removes meaningful change records. This cannot be undone.</p></div><Button variant="secondary" size="sm" onClick={() => confirmAction("Permanently delete task history?", () => undefined, "Demo history was left unchanged because it is seeded sample data.")}>Delete history</Button></div>
             <div className="data-action"><div><strong>Delete account and associated data</strong><p>Production uses cascading deletion after a fresh confirmation.</p></div><Button variant="danger" size="sm" onClick={() => confirmAction("Delete this account and all associated data? This action cannot be undone.", () => undefined, "Account deletion is disabled in demo mode.")}>Delete account</Button></div>
-            <p className="privacy-copy">PlanPilot sends imported text to OpenAI only when the OpenAI provider is explicitly configured; mock mode keeps extraction local to this app. No claim is made here about model training or provider retention beyond the configured provider’s policy.</p>
+            <p className="privacy-copy">PlanPilot sends imported text to the configured AI provider (Gemini or OpenAI) only when that provider is enabled; local mode keeps interpretation inside this app. No claim is made here about model training or retention beyond the configured provider’s policy.</p>
           </section>
         </div>
       </div>
@@ -3127,6 +3724,13 @@ function SettingsView() {
 }
 
 export default function PlanPilotApp({ view }: { view: PlanPilotView }) {
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("v") === packageJson.version) return;
+    url.searchParams.set("v", packageJson.version);
+    window.history.replaceState(window.history.state, "", url);
+  }, []);
+
   if (view === "landing") return <LandingView />;
   if (view === "login") return <LoginView />;
   if (view === "onboarding") return <OnboardingView />;

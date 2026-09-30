@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { extractedTaskSchema, planningRulesSchema } from "./extraction-schema";
+import { materializeCalculatedTimeBlock } from "./calculated-time-block";
+import { withTaskClassification } from "./task-classification";
 import type {
   HistoryItem,
   PlanningMode,
@@ -8,6 +10,21 @@ import type {
   ScheduleProposal,
   SessionReview,
 } from "./types";
+
+export const EXTRACTION_MODES = [
+  "gemini-hybrid",
+  "openai-hybrid",
+  "gemini-direct",
+  "openai-direct",
+  "local-fallback",
+  // Legacy values remain readable so existing workspaces are not invalidated.
+  "gemini",
+  "openai",
+  "local",
+  "fast-local",
+] as const;
+
+export type ExtractionMode = (typeof EXTRACTION_MODES)[number];
 
 const sessionStatusSchema = z.enum([
   "proposed",
@@ -104,7 +121,7 @@ export const persistedWorkspaceSchema = z.object({
   sessionReviews: z.array(sessionReviewSchema).max(2_000),
   planningMode: z.enum(["conservative", "balanced", "aggressive"]),
   planningRules: planningRulesSchema.optional(),
-  extractionMode: z.enum(["gemini", "openai", "local", "fast-local"]).optional(),
+  extractionMode: z.enum(EXTRACTION_MODES).optional(),
   replan: z.unknown().optional(),
 });
 
@@ -118,10 +135,11 @@ export type PersistedWorkspace = {
   sessionReviews: SessionReview[];
   planningMode: PlanningMode;
   planningRules?: PlanningRules;
-  extractionMode?: "gemini" | "openai" | "local" | "fast-local";
+  extractionMode?: ExtractionMode;
   replan?: ReplanProposal;
 };
 
 export function parsePersistedWorkspace(value: unknown): PersistedWorkspace {
-  return persistedWorkspaceSchema.parse(value) as PersistedWorkspace;
+  const state = persistedWorkspaceSchema.parse(value) as PersistedWorkspace;
+  return { ...state, tasks: state.tasks.map((task) => withTaskClassification(materializeCalculatedTimeBlock(task))) };
 }

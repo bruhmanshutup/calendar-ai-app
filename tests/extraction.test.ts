@@ -55,6 +55,89 @@ describe("extraction validation and mock interpretation", () => {
     expect(result.tasks[1].dueTime).toBe("15:00");
   });
 
+  it("keeps explicit deadlines separate from a fixed meeting in natural email prose", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      currentLocalDate: "2026-08-29",
+      timeZone: "America/Los_Angeles",
+      text: `Hi Zach,
+Just a reminder that your design proposal is due Friday, September 4 at 11:59 PM. Before then, please send me your preliminary CAD drawings by Wednesday afternoon so I can review them.
+
+We’ll meet Thursday at 2 PM for about an hour to go over feedback. If possible, try to make any final edits Thursday evening so you aren’t rushing Friday night.
+
+Thanks!`,
+    });
+
+    expect(result.tasks).toHaveLength(4);
+    expect(result.tasks[0]).toMatchObject({
+      title: "your design proposal",
+      taskType: "flexible",
+      dueDate: "2026-09-04",
+      dueTime: "23:59",
+      dueAt: "2026-09-05T06:59:00.000Z",
+      fixedStartAt: undefined,
+    });
+    expect(result.tasks[1]).toMatchObject({
+      title: "send me your preliminary CAD drawings so I can review them",
+      taskType: "flexible",
+      dueDate: "2026-09-02",
+      dueTime: undefined,
+    });
+    expect(result.tasks[2]).toMatchObject({
+      title: "Meet to go over feedback",
+      taskType: "fixed_time",
+      dueDate: undefined,
+      fixedStartAt: "2026-09-03T21:00:00.000Z",
+      fixedEndAt: "2026-09-03T22:00:00.000Z",
+      estimatedMinutes: 60,
+      effortEstimateSource: "stated",
+      reviewRequired: false,
+    });
+    expect(result.tasks[3]).toMatchObject({
+      title: "make any final edits",
+      taskType: "flexible",
+      dueDate: "2026-09-03",
+      fixedStartAt: undefined,
+    });
+    expect(result.tasks.map((task) => task.title).join(" ")).not.toMatch(
+      /September 4|11:59|Wednesday afternoon|Thursday evening/i,
+    );
+  });
+
+  it("recognizes natural meeting durations without treating meeting edits as events", async () => {
+    const result = await new MockTaskExtractionProvider().extractTasks({
+      ...input,
+      text: [
+        "We meet Tuesday at 10 AM for one hour.",
+        "Meet with Professor Lee Wednesday at 1 PM for half an hour.",
+        "Meet the deadline Friday at 5 PM.",
+        "Schedule a meeting Thursday at 2 PM.",
+        "Cancel the meeting Friday at 3 PM.",
+        "Reschedule the meeting Saturday at 11 AM.",
+        "We meet requirements Sunday at 4 PM.",
+      ].join("\n"),
+    });
+
+    expect(result.tasks.map((task) => task.taskType)).toEqual([
+      "fixed_time",
+      "fixed_time",
+      "flexible",
+      "flexible",
+      "flexible",
+      "flexible",
+      "flexible",
+    ]);
+    expect(result.tasks[0]).toMatchObject({
+      estimatedMinutes: 60,
+      effortEstimateSource: "stated",
+      fixedEndAt: "2026-08-04T18:00:00.000Z",
+    });
+    expect(result.tasks[1]).toMatchObject({
+      estimatedMinutes: 30,
+      effortEstimateSource: "stated",
+      fixedEndAt: "2026-08-05T20:30:00.000Z",
+    });
+  });
+
   it("removes duplicate tasks caused by repeated wording", async () => {
     const result = await new MockTaskExtractionProvider().extractTasks({
       ...input,

@@ -1,73 +1,50 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { MockCalendarProvider } from "@/lib/providers/mock-calendar";
+import { createCalendarFile } from "@/lib/providers/icalendar";
 
 const sessionSchema = z.object({
-  id: z.string(),
-  taskId: z.string(),
-  title: z.string(),
+  id: z.string().min(1),
+  title: z.string().min(1),
   start: z.string().datetime({ offset: true }),
   end: z.string().datetime({ offset: true }),
-  minutes: z.number().int().positive(),
   status: z.literal("approved"),
-  locked: z.boolean(),
-  reasonCodes: z.array(
-    z.enum([
-      "DEADLINE_RISK",
-      "PREFERRED_FOCUS_WINDOW",
-      "PREFERRED_ROUTINE_WINDOW",
-      "PRIORITY",
-      "EARLY_COMPLETION",
-      "SPLIT_TO_REDUCE_FATIGUE",
-      "RECURRING_SPACING",
-      "BUFFER_PRESERVED",
-      "LOW_ENERGY_FIT",
-      "TASK_TIME_WINDOW",
-      "REST_DAY_SPACING",
-      "FINAL_VALID_OPENING",
-      "STABILITY_PRESERVED",
-      "MOVED_AFTER_MISSED",
-      "SEQUENCE_ORDER",
-      "FIXED_TIME",
-    ]),
-  ),
   explanation: z.string(),
+}).refine((session) => Date.parse(session.end) > Date.parse(session.start), {
+  message: "Session end must be after its start.",
 });
 
 const requestSchema = z.object({
   explicitlyApproved: z.literal(true),
   reminderMinutes: z.number().int().min(0).max(40_320),
-  sessions: z.array(sessionSchema).min(1).max(100),
+  sessions: z.array(sessionSchema).min(1).max(1000).refine(
+    (sessions) => new Set(sessions.map((session) => session.id)).size === sessions.length,
+    { message: "Each session must have a unique ID." },
+  ),
 });
 
-const mockCalendar = new MockCalendarProvider();
-
 export async function POST(request: Request): Promise<Response> {
-  const parsed = requestSchema.safeParse(await request.json());
+  const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
       {
         error: {
-          code: "APPROVAL_REQUIRED",
+          code: "INVALID_CALENDAR_EXPORT",
           message:
-            "Only explicitly approved PlanPilot sessions can be exported.",
+            "Export requires 1–1,000 explicitly approved sessions with valid start and end times and unique IDs.",
         },
       },
       { status: 400 },
     );
   }
-  const ids = await Promise.all(
-    parsed.data.sessions.map((session) =>
-      mockCalendar.createEvent({
-        idempotencyKey: `planpilot:${session.id}`,
-        title: session.title,
-        start: session.start,
-        end: session.end,
-        description: `${session.explanation}\n\nPlanPilot session: ${session.id}`,
-        reminderMinutes: parsed.data.reminderMinutes,
-        session,
-      }),
-    ),
+  const calendar = createCalendarFile(
+    parsed.data.sessions,
+    parsed.data.reminderMinutes,
   );
-  return NextResponse.json({ eventIds: ids, provider: "mock" });
+  return new Response(calendar, {
+    headers: {
+      "Content-Type": "text/calendar; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="planpilot-schedule.ics"',
+      "Cache-Control": "no-store",
+    },
+  });
 }

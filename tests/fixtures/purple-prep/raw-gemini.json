@@ -1,0 +1,946 @@
+{
+  "responsibilities": [
+    {
+      "id": "resp-1",
+      "title": "Submit Fall Payment",
+      "kind": "task",
+      "sourceText": "Submit Fall Payment (starting August 10)\n\n  9/01/26(OVERDUE)",
+      "sourceStart": 435,
+      "sourceEnd": 508,
+      "factEvidence": [
+        {
+          "sourceText": "9/01/26",
+          "sourceStart": 490,
+          "sourceEnd": 497
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-01",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 30,
+        "preferredMinutes": 30,
+        "maximumMinutes": 30,
+        "approximate": true
+      },
+      "constraints": {
+        "allowedWindows": [
+          {
+            "date": "2026-08-10",
+            "label": "starting August 10"
+          }
+        ]
+      },
+      "planning": {
+        "estimatedMinutes": 30,
+        "priority": "high",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-2",
+      "title": "Read your early-September Purple Prep email",
+      "kind": "task",
+      "sourceText": "Read your early-September Purple Prep email\n\n  9/01/26(OVERDUE)",
+      "sourceStart": 523,
+      "sourceEnd": 598,
+      "factEvidence": [
+        {
+          "sourceText": "9/01/26",
+          "sourceStart": 580,
+          "sourceEnd": 587
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-01",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 15,
+        "preferredMinutes": 15,
+        "maximumMinutes": 15,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 15,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-3",
+      "title": "Update Display Name and Pronouns in NUValidate",
+      "kind": "task",
+      "sourceText": "Update Display Name and Pronouns in NUValidate\n\n  9/01/26(OVERDUE)",
+      "sourceStart": 613,
+      "sourceEnd": 692,
+      "factEvidence": [
+        {
+          "sourceText": "9/01/26",
+          "sourceStart": 674,
+          "sourceEnd": 681
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-01",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 10,
+        "preferredMinutes": 10,
+        "maximumMinutes": 10,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 10,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-4",
+      "title": "Update Emergency Contacts in CAESAR",
+      "kind": "task",
+      "sourceText": "Update Emergency Contacts in CAESAR\n\n  9/05/26(OVERDUE)",
+      "sourceStart": 707,
+      "sourceEnd": 778,
+      "factEvidence": [
+        {
+          "sourceText": "9/05/26",
+          "sourceStart": 760,
+          "sourceEnd": 767
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-05",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 10,
+        "preferredMinutes": 10,
+        "maximumMinutes": 10,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 10,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-5",
+      "title": "Review the 26-27 Student Handbook",
+      "kind": "task",
+      "sourceText": "Review the 26-27 Student Handbook\n\n  9/05/26(OVERDUE)",
+      "sourceStart": 793,
+      "sourceEnd": 863,
+      "factEvidence": [
+        {
+          "sourceText": "9/05/26",
+          "sourceStart": 845,
+          "sourceEnd": 852
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-05",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 30,
+        "preferredMinutes": 30,
+        "maximumMinutes": 30,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 30,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "medium"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-6",
+      "title": "Pre-Arrival Module: Hazing Awareness and Prevention for Students",
+      "kind": "task",
+      "sourceText": "Pre-Arrival Module: Hazing Awareness and Prevention for Students\n \n9/06/26",
+      "sourceStart": 878,
+      "sourceEnd": 957,
+      "factEvidence": [
+        {
+          "sourceText": "9/06/26",
+          "sourceStart": 949,
+          "sourceEnd": 956
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-06",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 45,
+        "preferredMinutes": 45,
+        "maximumMinutes": 45,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 45,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "medium"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-7",
+      "title": "Pre-Arrival Module: Campus Safety at Northwestern",
+      "kind": "task",
+      "sourceText": "Pre-Arrival Module: Campus Safety at Northwestern\n\n  9/06/26(OVERDUE)",
+      "sourceStart": 1007,
+      "sourceEnd": 1084,
+      "factEvidence": [
+        {
+          "sourceText": "9/06/26",
+          "sourceStart": 1066,
+          "sourceEnd": 1073
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-06",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 45,
+        "preferredMinutes": 45,
+        "maximumMinutes": 45,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 45,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "medium"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-8",
+      "title": "Pre-Arrival Module: Academic Integrity",
+      "kind": "task",
+      "sourceText": "Pre-Arrival Module: Academic Integrity\n\n  9/06/26(OVERDUE)",
+      "sourceStart": 1134,
+      "sourceEnd": 1198,
+      "factEvidence": [
+        {
+          "sourceText": "9/06/26",
+          "sourceStart": 1180,
+          "sourceEnd": 1187
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-06",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 45,
+        "preferredMinutes": 45,
+        "maximumMinutes": 45,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 45,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "medium"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-9",
+      "title": "Pre-Arrival Module: AlcoholEdu for College",
+      "kind": "task",
+      "sourceText": "Pre-Arrival Module: AlcoholEdu for College\n \n9/06/26",
+      "sourceStart": 1248,
+      "sourceEnd": 1313,
+      "factEvidence": [
+        {
+          "sourceText": "9/06/26",
+          "sourceStart": 1305,
+          "sourceEnd": 1312
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-06",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 60,
+        "preferredMinutes": 60,
+        "maximumMinutes": 60,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 60,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "medium"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-10",
+      "title": "Pre-Arrival Module: RespectEdu for College Students",
+      "kind": "task",
+      "sourceText": "Pre-Arrival Module: RespectEdu for College Students\n \n9/06/26",
+      "sourceStart": 1358,
+      "sourceEnd": 1432,
+      "factEvidence": [
+        {
+          "sourceText": "9/06/26",
+          "sourceStart": 1424,
+          "sourceEnd": 1431
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-06",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 45,
+        "preferredMinutes": 45,
+        "maximumMinutes": 45,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 45,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "medium"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-11",
+      "title": "Pre-Arrival Module: Building a Community of Respect and Breaking Down Bias",
+      "kind": "task",
+      "sourceText": "Pre-Arrival Module: Building a Community of Respect and Breaking Down Bias\n \n9/06/26",
+      "sourceStart": 1477,
+      "sourceEnd": 1579,
+      "factEvidence": [
+        {
+          "sourceText": "9/06/26",
+          "sourceStart": 1571,
+          "sourceEnd": 1578
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-06",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 45,
+        "preferredMinutes": 45,
+        "maximumMinutes": 45,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 45,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "medium"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-12",
+      "title": "Complete the Sustainability at Northwestern Module",
+      "kind": "task",
+      "sourceText": "Complete the Sustainability at Northwestern Module\n \n9/07/26",
+      "sourceStart": 1594,
+      "sourceEnd": 1668,
+      "factEvidence": [
+        {
+          "sourceText": "9/07/26",
+          "sourceStart": 1660,
+          "sourceEnd": 1667
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-07",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 30,
+        "preferredMinutes": 30,
+        "maximumMinutes": 30,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 30,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-13",
+      "title": "Complete the McCormick Academic Advising Module",
+      "kind": "task",
+      "sourceText": "Complete the McCormick Academic Advising Module (starting August 31)\n \n9/09/26MEAS",
+      "sourceStart": 1683,
+      "sourceEnd": 1774,
+      "factEvidence": [
+        {
+          "sourceText": "9/09/26",
+          "sourceStart": 1759,
+          "sourceEnd": 1766
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-09",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 45,
+        "preferredMinutes": 45,
+        "maximumMinutes": 45,
+        "approximate": true
+      },
+      "constraints": {
+        "allowedWindows": [
+          {
+            "date": "2026-08-31",
+            "label": "starting August 31"
+          }
+        ]
+      },
+      "planning": {
+        "estimatedMinutes": 45,
+        "priority": "high",
+        "category": "school",
+        "energyDemand": "medium"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-14",
+      "title": "Complete the Student Financial Responsibility Agreement",
+      "kind": "task",
+      "sourceText": "Complete the Student Financial Responsibility Agreement\n \n9/10/26",
+      "sourceStart": 1789,
+      "sourceEnd": 1867,
+      "factEvidence": [
+        {
+          "sourceText": "9/10/26",
+          "sourceStart": 1859,
+          "sourceEnd": 1866
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-10",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 15,
+        "preferredMinutes": 15,
+        "maximumMinutes": 15,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 15,
+        "priority": "high",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-15",
+      "title": "Review what to pack & bring to campus",
+      "kind": "task",
+      "sourceText": "Review what to pack & bring to campus\n \n9/11/26",
+      "sourceStart": 1882,
+      "sourceEnd": 1935,
+      "factEvidence": [
+        {
+          "sourceText": "9/11/26",
+          "sourceStart": 1927,
+          "sourceEnd": 1934
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-11",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 30,
+        "preferredMinutes": 30,
+        "maximumMinutes": 30,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 30,
+        "priority": "medium",
+        "category": "personal",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-16",
+      "title": "Set up your device for eduroam access",
+      "kind": "task",
+      "sourceText": "Set up your device for eduroam access\n \n9/11/26",
+      "sourceStart": 1950,
+      "sourceEnd": 2004,
+      "factEvidence": [
+        {
+          "sourceText": "9/11/26",
+          "sourceStart": 1996,
+          "sourceEnd": 2003
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-11",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 20,
+        "preferredMinutes": 20,
+        "maximumMinutes": 20,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 20,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-17",
+      "title": "Complete the Survey of New Students (optional)",
+      "kind": "task",
+      "sourceText": "Complete the Survey of New Students (optional)\n \n9/13/26",
+      "sourceStart": 2019,
+      "sourceEnd": 2087,
+      "factEvidence": [
+        {
+          "sourceText": "9/13/26",
+          "sourceStart": 2079,
+          "sourceEnd": 2086
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-13",
+        "strength": "soft",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 15,
+        "preferredMinutes": 15,
+        "maximumMinutes": 15,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 15,
+        "priority": "low",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-18",
+      "title": "Review weeks 5-9 of Before the Arch content (optional)",
+      "kind": "task",
+      "sourceText": "Review weeks 5-9 of Before the Arch content (optional)\n \n9/13/26",
+      "sourceStart": 2102,
+      "sourceEnd": 2175,
+      "factEvidence": [
+        {
+          "sourceText": "9/13/26",
+          "sourceStart": 2167,
+          "sourceEnd": 2174
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-13",
+        "strength": "soft",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 30,
+        "preferredMinutes": 30,
+        "maximumMinutes": 30,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 30,
+        "priority": "low",
+        "category": "school",
+        "energyDemand": "medium"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-19",
+      "title": "Download 'Cats on Campus",
+      "kind": "task",
+      "sourceText": "Download 'Cats on Campus\n \n9/13/26",
+      "sourceStart": 2190,
+      "sourceEnd": 2228,
+      "factEvidence": [
+        {
+          "sourceText": "9/13/26",
+          "sourceStart": 2220,
+          "sourceEnd": 2227
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-13",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 5,
+        "preferredMinutes": 5,
+        "maximumMinutes": 5,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 5,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-20",
+      "title": "Download TimelyCare (optional)",
+      "kind": "task",
+      "sourceText": "Download TimelyCare (optional)\n \n9/14/26",
+      "sourceStart": 2243,
+      "sourceEnd": 2285,
+      "factEvidence": [
+        {
+          "sourceText": "9/14/26",
+          "sourceStart": 2277,
+          "sourceEnd": 2284
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-14",
+        "strength": "soft",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 5,
+        "preferredMinutes": 5,
+        "maximumMinutes": 5,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 5,
+        "priority": "low",
+        "category": "health",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-21",
+      "title": "Download and install antivirus software on your device",
+      "kind": "task",
+      "sourceText": "Download and install antivirus software on your device\n \n9/14/26",
+      "sourceStart": 2300,
+      "sourceEnd": 2374,
+      "factEvidence": [
+        {
+          "sourceText": "9/14/26",
+          "sourceStart": 2366,
+          "sourceEnd": 2373
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-14",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 20,
+        "preferredMinutes": 20,
+        "maximumMinutes": 20,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 20,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    },
+    {
+      "id": "resp-22",
+      "title": "Download NUGuardian App",
+      "kind": "task",
+      "sourceText": "Download NUGuardian App\n \n9/14/26",
+      "sourceStart": 2389,
+      "sourceEnd": 2426,
+      "factEvidence": [
+        {
+          "sourceText": "9/14/26",
+          "sourceStart": 2418,
+          "sourceEnd": 2425
+        }
+      ],
+      "deadline": {
+        "date": "2026-09-14",
+        "strength": "hard",
+        "confidence": 1.0
+      },
+      "occurrence": {
+        "date": "",
+        "dateSourceText": "",
+        "confidence": 1.0
+      },
+      "duration": {
+        "explicit": false,
+        "minimumMinutes": 5,
+        "preferredMinutes": 5,
+        "maximumMinutes": 5,
+        "approximate": true
+      },
+      "constraints": {},
+      "planning": {
+        "estimatedMinutes": 5,
+        "priority": "medium",
+        "category": "school",
+        "energyDemand": "low"
+      },
+      "confidence": 1.0,
+      "missingInformation": [],
+      "reviewRequired": false
+    }
+  ],
+  "relations": [],
+  "blockedTimes": [],
+  "globalInstructions": [],
+  "ignoredStatements": []
+}

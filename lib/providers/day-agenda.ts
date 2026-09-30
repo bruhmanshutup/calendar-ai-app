@@ -6,7 +6,10 @@ const CLOCK_AT_START =
 
 export function dayAgendaDateContext(line: string): string | undefined {
   const match = DAY_HEADING.exec(line);
-  return match?.[2] ?? match?.[1];
+  // The weekday is the structural date context for an explicit agenda. A
+  // parenthetical such as "(today)" is often stale when a saved agenda is
+  // imported again, so it must not override the named day.
+  return match?.[1];
 }
 
 /**

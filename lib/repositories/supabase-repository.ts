@@ -12,6 +12,7 @@ import type {
   PlanPilotRepository,
   UserProfile,
 } from "./planpilot-repository";
+import { toSupabaseTaskRow } from "./supabase-task-row";
 
 function configuredClient(accessToken: string): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -83,30 +84,14 @@ export class SupabasePlanPilotRepository implements PlanPilotRepository {
   async saveTasks(sourceId: string, tasks: ExtractedTask[]): Promise<void> {
     const userId = await this.userId();
     const { error } = await this.client.from("tasks").insert(
-      tasks.map((task) => ({
-        user_id: userId,
-        source_id: sourceId,
-        title: task.title,
-        description: task.description,
-        task_type: task.taskType,
-        due_date: task.dueDate,
-        due_time: task.dueTime,
-        fixed_start_at: task.fixedStartAt,
-        fixed_end_at: task.fixedEndAt,
-        estimated_minutes: task.estimatedMinutes,
-        priority: task.priority,
-        category: task.category,
-        energy_demand: task.energyDemand,
-        splittable: task.splittable,
-        minimum_session_minutes: task.minimumSessionMinutes,
-        recurrence: task.recurrence,
-        confidence: task.confidence,
-        field_confidence: task.fieldConfidence,
-        missing_information: task.missingInformation,
-        source_excerpt: task.sourceText,
-        review_required: task.reviewRequired ?? false,
-        approved_at: task.approved ? new Date().toISOString() : null,
-      })),
+      tasks.map((task) =>
+        toSupabaseTaskRow(
+          userId,
+          sourceId,
+          task,
+          task.approved ? new Date().toISOString() : null,
+        ),
+      ),
     );
     if (error) throw error;
   }
@@ -182,4 +167,3 @@ export class SupabasePlanPilotRepository implements PlanPilotRepository {
     if (error) throw error;
   }
 }
-

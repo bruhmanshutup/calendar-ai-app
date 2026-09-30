@@ -93,7 +93,14 @@ export async function recoverTimedRecurrences(
     recoveredBySource.delete(normalizedSource(task.sourceText));
     return mergeTimedRecurrence(task, recovered);
   });
-  const recoveredTasks = [...recoveredBySource.values()].map((task, index) => ({
+  // A recurrence-shaped phrase with no usable clock rules is not evidence of
+  // a missed responsibility. It may be a qualifier already interpreted by the
+  // model (for example, a bounded event lasting several days). Keep uncertain
+  // standalone routines from the local fallback, but do not append a new
+  // timed series to a successful interpretation solely from such a phrase.
+  const recoveredTasks = [...recoveredBySource.values()].filter((task) =>
+    Boolean(task.recurrence?.timeRules?.length || task.recurrence?.monthlyRules?.length),
+  ).map((task, index) => ({
     ...task,
     id: `recovered-recurrence-${index + 1}`,
   }));

@@ -5,6 +5,7 @@ import { proposeMinimalReplan } from "../lib/domain/rescheduler";
 import { MockCalendarProvider } from "../lib/providers/mock-calendar";
 import { MockTaskExtractionProvider } from "../lib/providers/mock-extraction";
 import { scheduling } from "./fixtures";
+import { POST as exportCalendar } from "../app/api/calendar/export/route";
 
 describe("vertical workflow integration", () => {
   it("runs paste → extract → review → schedule → approve → export → missed → replan", async () => {
@@ -32,6 +33,12 @@ describe("vertical workflow integration", () => {
       ...session,
       status: "approved" as const,
     }));
+    const download = await exportCalendar(new Request("http://localhost/api/calendar/export", {
+      method: "POST",
+      body: JSON.stringify({ explicitlyApproved: true, reminderMinutes: 10, sessions: approved }),
+    }));
+    expect(download.status).toBe(200);
+    expect((await download.text()).match(/^BEGIN:VEVENT$/gm)).toHaveLength(approved.length);
     const calendar = new MockCalendarProvider();
     const exportedId = await calendar.createEvent({
       idempotencyKey: `planpilot:${approved[0].id}`,

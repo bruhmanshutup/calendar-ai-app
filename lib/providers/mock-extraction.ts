@@ -76,6 +76,32 @@ function estimateMinutes(text: string): {
       rationale: "Used the start and end times stated for each occurrence.",
     };
   }
+  if (
+    /\b(?:(?:about|around|approximately|roughly)\s+)?(?:a\s+)?half\s+(?:an?\s+)?hour\b/i.test(
+      text,
+    )
+  ) {
+    return {
+      minutes: 30,
+      confidence: 0.98,
+      assumed: false,
+      source: "stated",
+      rationale: "Used the duration stated in the source text.",
+    };
+  }
+  if (
+    /\b(?:(?:about|around|approximately|roughly)\s+)?(?:an?|one)\s+hour\b/i.test(
+      text,
+    )
+  ) {
+    return {
+      minutes: 60,
+      confidence: 0.98,
+      assumed: false,
+      source: "stated",
+      rationale: "Used the duration stated in the source text.",
+    };
+  }
   const hours = /(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i.exec(text);
   if (hours) {
     return {
@@ -263,6 +289,10 @@ const LEADING_GERUND: Record<string, string> = {
 function cleanConversationalOpening(value: string): string {
   const cleaned = value
     .replace(/^(?:hey|hi|yo|ugh|okay|ok)[\s,!—–-]+/i, "")
+    .replace(/^(?:just\s+)?a\s+reminder\s+that\s+/i, "")
+    .replace(/^before\s+(?:then|that|this),?\s+(?:please\s+)?/i, "")
+    .replace(/^if\s+possible,?\s+(?:please\s+)?(?:try\s+to\s+)?/i, "")
+    .replace(/^(?:we\s+(?:will\s+)?|we[’']ll\s+)meet\b/i, "Meet")
     .replace(/^(?:maybe\s+)?(?:someday\s+)?/i, "")
     .replace(/^i[’']d\s+like\s+to\s+/i, "")
     .replace(/^(?:would|could|do)\s+you\s+mind\s+(?:please\s+)?/i, "")
@@ -287,9 +317,33 @@ function cleanConversationalOpening(value: string): string {
     : cleaned;
 }
 
+function stripDatePhrase(value: string, datePhrase?: string): string {
+  if (!datePhrase) return value;
+  const escaped = datePhrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const daypart = "(?:\\s+(?:morning|afternoon|evening|night))?";
+  const introduced = new RegExp(
+    `\\b(?:(?:is\\s+)?due(?:\\s+on)?|by|before|on|at)\\s+${escaped}${daypart}`,
+    "i",
+  );
+  const direct = new RegExp(`${escaped}${daypart}`, "i");
+  const withoutPhrase = introduced.test(value)
+    ? value.replace(introduced, " ")
+    : value.replace(direct, " ");
+
+  return withoutPhrase
+    .replace(
+      /\b(?:is\s+)?due(?:\s+on)?\s+(?:(?:this|next)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi,
+      " ",
+    )
+    .replace(/\b(?:is\s+)?due\b(?=\s*[,;:.!?—–-]*$)/i, " ");
+}
+
 function titleFor(text: string, datePhrase?: string): string {
   return cleanConversationalOpening(
-    markdownText(text)
+    stripDatePhrase(markdownText(text), datePhrase)
+    // LMS exports often put the clock on the Due row after the date. The
+    // clock belongs to the deadline, not to the responsibility title.
+    .replace(/[,\s]+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b/gi, " ")
     .replace(
       /^\s*(?:[-*•▪‣→☐□⬜🔲]|\d+[.)]|[ivxlcdm]+[.)]|\[[ xX]\])\s*/iu,
       "",
@@ -299,13 +353,17 @@ function titleFor(text: string, datePhrase?: string): string {
       /^(?:make sure to|remember to|don't forget to)\s+/i,
       "",
     )
-    .replace(datePhrase ?? /$^/, " ")
     .replace(/\s*\(\s*overdue\s*\)\s*/gi, " ")
     .replace(
       /\b(?:by|before|on|due(?:\s+on)?)\s*(?=[,;:.!?—–-]*$)/i,
       "",
     )
-    .replace(/\b(?:for\s+)?\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?)(?:\s+each)?\b/gi, " ")
+    .replace(
+      /\b(?:for\s+)?(?:(?:about|around|approximately|roughly)\s+)?(?:(?:a\s+)?half\s+(?:an?\s+)?|(?:an?|one)\s+|\d+(?:\.\d+)?\s*)(?:hours?|hrs?)(?:\s+each)?\b/gi,
+      " ",
+    )
+    .replace(/\b(?:for\s+)?\d+\s*(?:minutes?|mins?)(?:\s+each)?\b/gi, " ")
+    .replace(/\s+so\s+you\s+(?:are\s+not|aren[’']t)\s+rushing\b.*$/i, " ")
     .replace(
       /[.!?]\s*(?:(?:it|this|that)\s+)?(?:should|will|would|could|might|may|probably|roughly|likely|only)*\s*(?:take|takes|need|needs|require|requires|run)[\s.!?]*$/i,
       "",
@@ -338,27 +396,53 @@ function extractDatePhrase(text: string): string | undefined {
   const timeSuffix =
     "(?:\\s+(?:at\\s+)?(?:\\d{1,2}:\\d{2}(?:\\s*(?:am|pm))?|\\d{1,2}\\s*(?:am|pm)))?";
   const patterns = [
-    new RegExp(`\\b(?:today|tomorrow|tonight)${timeSuffix}`, "i"),
-    new RegExp(
-      `\\b(?:next\\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)${timeSuffix}`,
-      "i",
-    ),
-    new RegExp(`\\b\\d{4}-\\d{1,2}-\\d{1,2}${timeSuffix}`, "i"),
-    new RegExp(`\\b\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?${timeSuffix}`, "i"),
-    new RegExp(
-      `\\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?${timeSuffix}`,
-      "i",
-    ),
-    new RegExp(
-      `\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:,?\\s+\\d{4})?${timeSuffix}`,
-      "i",
-    ),
+    {
+      pattern: new RegExp(`\\b(?:today|tomorrow|tonight)${timeSuffix}`, "i"),
+      specificity: 40,
+    },
+    {
+      pattern: new RegExp(
+        `\\b(?:next\\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)${timeSuffix}`,
+        "i",
+      ),
+      specificity: 50,
+    },
+    {
+      pattern: new RegExp(`\\b\\d{4}-\\d{1,2}-\\d{1,2}${timeSuffix}`, "i"),
+      specificity: 100,
+    },
+    {
+      pattern: new RegExp(`\\b\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?${timeSuffix}`, "i"),
+      specificity: 90,
+    },
+    {
+      pattern: new RegExp(
+        `\\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?${timeSuffix}`,
+        "i",
+      ),
+      specificity: 100,
+    },
+    {
+      pattern: new RegExp(
+        `\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:,?\\s+\\d{4})?${timeSuffix}`,
+        "i",
+      ),
+      specificity: 100,
+    },
   ];
-  for (const pattern of patterns) {
-    const match = pattern.exec(text);
-    if (match) return match[0].trim();
-  }
-  return undefined;
+  return patterns
+    .flatMap(({ pattern, specificity }) => {
+      const match = pattern.exec(text);
+      if (!match) return [];
+      const value = match[0].trim();
+      const hasClock = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i.test(value);
+      return [{ value, index: match.index, score: specificity + (hasClock ? 20 : 0) }];
+    })
+    .sort((left, right) =>
+      right.score - left.score ||
+      right.value.length - left.value.length ||
+      left.index - right.index
+    )[0]?.value;
 }
 
 function localWeekWindow(
@@ -392,13 +476,27 @@ function isFixedEvent(text: string): boolean {
   ) {
     return false;
   }
-  return /\b(appointment|breakfast|client call|conference call|dinner|flight|interview|lecture|lunch|meeting|office hours|practice|presentation|reservation|scheduled session|stand-?up|sync|town hall|visit|webinar|workshop)\b/i.test(
-    text,
-  );
+  const concreteMeet =
+    /\b(?:(?:we|i|you|they)(?:[’']ll|\s+will)?\s+meet|meet\s+with)\b/i.test(
+      text,
+    ) &&
+    !/\bmeet\s+(?:(?:a|the|our|your)\s+)?(?:deadlines?|requirements?|criteria|standards?|needs?|expectations?|goals?|targets?)\b/i.test(
+      text,
+    );
+  return concreteMeet ||
+    /\b(appointment|breakfast|client call|conference call|dinner|flight|interview|lecture|lunch|meeting|office hours|practice|presentation|reservation|scheduled session|stand-?up|sync|town hall|visit|webinar|workshop)\b/i.test(
+      text,
+    );
 }
 
 function isDeadlineLanguage(text: string): boolean {
-  return /\b(by|due|before|submit|complete|finish)\b/i.test(text);
+  return (
+    /\b(?:due(?:\s+on)?|deadline)\b/i.test(text) ||
+    /\b(?:by|before)\s+(?:(?:this|next)\s+)?(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may\b|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)/i.test(
+      text,
+    ) ||
+    /^\s*(?:please\s+)?(?:submit|complete|finish|turn\s+in)\b/i.test(text)
+  );
 }
 
 function priorityFor(
@@ -464,6 +562,7 @@ function isClearlyNonTask(text: string): boolean {
     /^(?:confidentiality notice|this (?:email|message) (?:and|may)|unsubscribe\b)/i.test(
       trimmed,
     ) ||
+    /^(?:last\s+)?(?:synced|updated|viewed|created)\s*:/i.test(trimmed) ||
     /^(?:task|action|item)\s+(?:due|deadline|estimate|duration|owner)(?:\s+(?:due|deadline|estimate|duration|owner))*$/i.test(
       trimmed,
     ) ||
@@ -549,7 +648,7 @@ function buildTask(
   );
   const fixedStartAt = fixed ? interpreted?.instant : undefined;
   const fixedEndAt = agendaTiming?.fixedEndAt ??
-    (fixedStartAt && (agendaTiming?.fixed || /\bfor\s+\d+/i.test(line))
+    (fixedStartAt && (agendaTiming?.fixed || estimate.source === "stated")
       ? addHours(new Date(fixedStartAt), estimate.minutes / 60).toISOString()
       : undefined);
   const missingInformation: string[] = [];
@@ -644,6 +743,7 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
     const agendaOnwardTaskIds = new Set<string>();
     const ignoredStatements: ExtractionResult["ignoredStatements"] = [];
     let agendaDateContext: string | undefined;
+    let previousAgendaWeekdayDate: string | undefined;
     const agendaBlockedTimes: NonNullable<
       ExtractionResult["planningRules"]
     >["blockedTimes"] = [];
@@ -652,7 +752,23 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
       const baseSemanticLine = semanticText(line);
       const dayHeading = dayAgendaDateContext(baseSemanticLine);
       if (dayHeading) {
-        agendaDateContext = dayHeading;
+        let resolvedHeadingDate = resolveRelativeDate(
+          dayHeading,
+          input.currentLocalDate,
+          input.timeZone,
+        ).date;
+        while (
+          resolvedHeadingDate &&
+          previousAgendaWeekdayDate &&
+          resolvedHeadingDate <= previousAgendaWeekdayDate
+        ) {
+          resolvedHeadingDate = format(
+            addWeeks(parseISO(resolvedHeadingDate), 1),
+            "yyyy-MM-dd",
+          );
+        }
+        agendaDateContext = resolvedHeadingDate ?? dayHeading;
+        previousAgendaWeekdayDate = resolvedHeadingDate;
         ignoredStatements.push({
           sourceText: line,
           reason: "Weekday heading used as context for the entries below.",
@@ -660,7 +776,7 @@ export class MockTaskExtractionProvider implements TaskExtractionProvider {
         return;
       }
       const agendaHeading =
-        /^(?:schedule|agenda|calendar|appointments?|events?)\s*(?:for|on)?\s*[:—–-]?\s*(.+)$/i.exec(
+        /^(?:schedule|agenda|calendar|appointments?|events?)\s*(?:(?:for|on)\s+|[:—–-]\s*)(.+)$/i.exec(
           baseSemanticLine,
         );
       const headingDate = agendaHeading

@@ -54,6 +54,12 @@ export function taskDeadlineInstant(
   if (task.dueAt && Number.isFinite(new Date(task.dueAt).getTime())) {
     return new Date(task.dueAt).toISOString();
   }
+  if (
+    task.dueWindow?.start &&
+    Number.isFinite(new Date(task.dueWindow.start).getTime())
+  ) {
+    return new Date(task.dueWindow.start).toISOString();
+  }
   if (task.dueDate) {
     if (task.dueTime) {
       return manualPlacementStart(task.dueDate, task.dueTime, timeZone);

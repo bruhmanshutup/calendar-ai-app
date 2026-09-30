@@ -177,6 +177,40 @@ describe("common exact recurrence wording", () => {
     );
   });
 
+  it("keeps excluded days out of an everyday clock range starting today", () => {
+    const parsed = parseTimedRecurrence(
+      "Exercise every day except Friday and Saturday from 6-8 PM starting today.",
+      {
+        currentLocalDate: "2026-09-04",
+        timeZone: "America/Los_Angeles",
+      },
+    );
+
+    expect(parsed?.recurrence).toMatchObject({
+      mode: "fixed_times",
+      anchorDate: "2026-09-04",
+      daysOfWeek: [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "sunday",
+      ],
+    });
+    expect(parsed?.recurrence.timeRules).toEqual([
+      {
+        daysOfWeek: [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "sunday",
+        ],
+        time: "18:00",
+      },
+    ]);
+  });
+
   it("parses an alternating workout range starting from a relative weekday", () => {
     const parsed = parseTimedRecurrence(
       "Work out on alternating days starting from this Monday from 6-7AM",

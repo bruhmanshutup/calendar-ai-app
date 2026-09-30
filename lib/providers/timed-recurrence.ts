@@ -20,6 +20,7 @@ const TIME_LIST = `${EXACT_TIME}(?:\\s*(?:,|and|&)\\s*(?:at\\s+)?${EXACT_TIME})*
 const MONTH_NAME =
   "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
 const DATE_EXPRESSION =
+  "(?:today|tomorrow|tonight)|" +
   `(?:\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|${MONTH_NAME}\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?|\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH_NAME}(?:,?\\s+\\d{4})?|(?:(?:this|next)\\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))`;
 
 const DAY_ALIASES: Array<[RegExp, DayOfWeek]> = [

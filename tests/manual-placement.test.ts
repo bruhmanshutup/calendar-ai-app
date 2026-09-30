@@ -211,6 +211,43 @@ describe("manual schedule placement", () => {
     ).toBe(true);
   });
 
+  it("uses an exact deadline before a due window, then the window start before a date", () => {
+    const dueWindow = {
+      start: "2026-08-19T19:00:00.000Z",
+      end: "2026-08-19T23:00:00.000Z",
+      label: "Wednesday afternoon",
+      precision: "named_period" as const,
+    };
+    const exactTask = task({
+      id: "exact-before-window",
+      title: "Exact deadline",
+      dueAt: "2026-08-19T20:30:00.000Z",
+      dueWindow,
+      dueDate: "2026-08-21",
+    });
+    const windowTask = task({
+      id: "window-before-date",
+      title: "Window deadline",
+      dueWindow,
+      dueDate: "2026-08-21",
+    });
+
+    expect(taskDeadlineInstant(exactTask, TIME_ZONE, "23:00")).toBe(
+      "2026-08-19T20:30:00.000Z",
+    );
+    expect(taskDeadlineInstant(windowTask, TIME_ZONE, "23:00")).toBe(
+      dueWindow.start,
+    );
+    expect(
+      isManualPlacementAfterDeadline(
+        windowTask,
+        "2026-08-19T19:00:00.001Z",
+        TIME_ZONE,
+        "23:00",
+      ),
+    ).toBe(true);
+  });
+
   it("uses the end of the planning day for a date-only deadline", () => {
     const deadlineTask = task({
       id: "date-only",

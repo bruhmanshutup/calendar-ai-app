@@ -268,6 +268,9 @@ function mergeTasks(
           preferredTimeWindows:
             preferred.schedulingConstraints?.preferredTimeWindows ??
             other.schedulingConstraints?.preferredTimeWindows,
+          preferredDateWindows:
+            preferred.schedulingConstraints?.preferredDateWindows ??
+            other.schedulingConstraints?.preferredDateWindows,
         }
       : undefined;
   return {
@@ -276,6 +279,7 @@ function mergeTasks(
     dueDate: preferred.dueDate ?? other.dueDate,
     dueTime: preferred.dueTime ?? other.dueTime,
     dueAt: preferred.dueAt ?? other.dueAt,
+    dueWindow: preferred.dueWindow ?? other.dueWindow,
     fixedStartAt: preferred.fixedStartAt ?? other.fixedStartAt,
     fixedEndAt: preferred.fixedEndAt ?? other.fixedEndAt,
     estimatedMinutes: preferred.estimatedMinutes ?? other.estimatedMinutes,

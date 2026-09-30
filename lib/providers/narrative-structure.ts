@@ -33,7 +33,7 @@ const EMAIL_SUBJECT = /^subject:\s*/i;
 const GREETING_OR_SIGNATURE =
   /^(?:hi|hello|hey|dear)\b[^.!?]{0,80}[,:]?\s*$|^(?:thanks|thank you|best|regards|sincerely|cheers)[,!]?\s*$/i;
 const DEPENDENCY_START =
-  /^(?:before (?:that|this|the meeting|the appointment)|beforehand|prior to (?:that|this|the meeting|the appointment)|after (?:that|this|the meeting|the appointment)|afterward|afterwards|once (?:that|this|it)\b|first,?\s|then,?\s)/i;
+  /^(?:before (?:then|that|this|the meeting|the appointment)|beforehand|prior to (?:that|this|the meeting|the appointment)|after (?:that|this|the meeting|the appointment)|afterward|afterwards|once (?:that|this|it)\b|first,?\s|then,?\s)/i;
 const GLOBAL_RULE =
   /\b(?:keep|leave|block)\b[^.!?]{0,60}\b(?:free|open|unscheduled)\b|\b(?:do not|don['\u2019]t|dont)\s+schedule\s+(?:anything|work)\b|\b(?:usually\s+)?(?:wake up|get up|go to (?:sleep|bed))\b|\b(?:work|tasks?)\s+scheduled\s+(?:before|after)\b|\b(?:unavailable|not available)\b/i;
 const DETAIL_START =
@@ -45,7 +45,11 @@ const REQUEST_ACTION =
 const IMPERATIVE_ACTION =
   /^(?:please\s+)?(?:add|apply|attend|book|buy|call|cancel|check|clean|complete|confirm|contact|do|draft|drop off|email|exercise|file|fill|finish|follow up|get|go|make|meet|order|organize|pay|pick up|practice|prepare|print|proofread|read|register|renew|reply|request|research|respond|return|review|rsvp|scan|schedule|send|shop|sign|start|study|submit|take|update|upload|view|visit|wash|work on|write)\b/i;
 const EVENT_STATEMENT =
-  /^(?:i\s+have|there(?:['\u2019]s| is)|my)\b[^.!?]{0,90}\b(?:appointment|class|exam|interview|meeting|quiz|shift|flight|reservation|deadline|due)\b/i;
+  /^(?:(?:just\s+)?a\s+reminder\s+that\s+)?(?:(?:i\s+have|there(?:['\u2019]s| is)|my)\b[^.!?]{0,90}\b(?:appointment|class|exam|interview|meeting|quiz|shift|flight|reservation|deadline|due)\b|(?:your|our|the|this|that|a|an)\b[^.!?]{0,100}\b(?:is|are)\s+due\b)/i;
+const MEETING_STATEMENT =
+  /^(?:we|i|you|they)(?:['\u2019]ll|\s+will)?\s+meet\b/i;
+const CONDITIONAL_ACTION_START =
+  /^if\s+possible,?\s+(?:please\s+)?(?:try\s+to\s+)?/i;
 const ACTIVE_COMMITMENT =
   /^(?:(?:on\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tonight|tomorrow)\s*,?\s+)?i(?:['\u2019]m| am)\s+(?:attending|driving|flying|hanging out|having|meeting|seeing|traveling|volunteering|working)\b/i;
 const IMPLIED_ACTIVITY =
@@ -57,6 +61,18 @@ const SECOND_ACTION = new RegExp(
   "i",
 );
 const HEADING = /^(?:.{1,60}:|(?:tasks?|agenda|schedule|reminders?|this week|today|tomorrow))$/i;
+
+function isActionStatement(text: string): boolean {
+  return (
+    FIRST_PERSON_ACTION.test(text) ||
+    REQUEST_ACTION.test(text) ||
+    IMPERATIVE_ACTION.test(text) ||
+    EVENT_STATEMENT.test(text) ||
+    MEETING_STATEMENT.test(text) ||
+    ACTIVE_COMMITMENT.test(text) ||
+    IMPLIED_ACTIVITY.test(text)
+  );
+}
 
 function splitSentences(line: string): string[] {
   const trimmed = line.trim();
@@ -93,20 +109,28 @@ function classifySegment(
     return "email_metadata";
   }
   if (listLine && COMPLETED_PREFIX.test(segment)) return "completed_item";
-  if (DEPENDENCY_START.test(text)) return "dependent_action";
+  const dependencyRemainder = DEPENDENCY_START.test(text)
+    ? text.replace(DEPENDENCY_START, "").replace(/^,\s*/, "").trim()
+    : undefined;
+  if (dependencyRemainder && isActionStatement(dependencyRemainder)) {
+    return "dependent_action";
+  }
   if (GLOBAL_RULE.test(text)) {
     return ACTIVE_COMMITMENT.test(text) ? "action" : "global_schedule_rule";
   }
   if (SECOND_ACTION.test(text)) return "possible_multiple_actions";
-  if (DETAIL_START.test(text)) return "detail";
+  const conditionalRemainder = CONDITIONAL_ACTION_START.test(text)
+    ? text.replace(CONDITIONAL_ACTION_START, "").trim()
+    : undefined;
   if (
-    FIRST_PERSON_ACTION.test(text) ||
-    REQUEST_ACTION.test(text) ||
-    IMPERATIVE_ACTION.test(text) ||
-    EVENT_STATEMENT.test(text) ||
-    ACTIVE_COMMITMENT.test(text) ||
-    IMPLIED_ACTIVITY.test(text)
+    conditionalRemainder &&
+    !/^(?:do|schedule|make)\s+(?:it|that|this)\b/i.test(conditionalRemainder) &&
+    isActionStatement(conditionalRemainder)
   ) {
+    return "action";
+  }
+  if (DETAIL_START.test(text)) return "detail";
+  if (isActionStatement(text)) {
     return "action";
   }
   if (listLine) return "list_item";
@@ -217,7 +241,7 @@ export function prepareTaskExtractionInput(
   input: ExtractionInput,
 ): ExtractionInput {
   const structured = prepareStructuredPlanExtractionInput(input);
-  return structured.text === input.text
-    ? prepareNarrativeStructureExtractionInput(input)
-    : structured;
+  return structured.structureHint
+    ? structured
+    : prepareNarrativeStructureExtractionInput(input);
 }
