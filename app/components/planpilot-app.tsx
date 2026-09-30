@@ -179,6 +179,19 @@ function formatTime(value: string): string {
   }).format(new Date(value));
 }
 
+/** Short calendar-style range: "10–10:50am", "11:30am–12:20pm". */
+function compactTimeRange(start: string, end: string): string {
+  const part = (value: string) => {
+    const [clock, meridiem] = formatTime(value).split(" ");
+    return { clock: clock.replace(/:00$/, ""), meridiem: (meridiem ?? "").toLowerCase() };
+  };
+  const from = part(start);
+  const to = part(end);
+  return from.meridiem === to.meridiem
+    ? `${from.clock}–${to.clock}${to.meridiem}`
+    : `${from.clock}${from.meridiem}–${to.clock}${to.meridiem}`;
+}
+
 function formatDay(value: string, long = false): string {
   return new Intl.DateTimeFormat("en-US", {
     timeZone: DEFAULT_PREFERENCES.timeZone,
@@ -2717,7 +2730,7 @@ export function ScheduleSessionCard({
           </label>
         )}
         <div className="session-main">
-          <span className="session-when">{formatTime(session.start)}–{formatTime(session.end)}</span>
+          <span className="session-when" title={`${formatTime(session.start)}–${formatTime(session.end)}`}>{compactTimeRange(session.start, session.end)}</span>
           <h3>{session.title}</h3>
         </div>
         {session.status === "proposed" ? (
@@ -2819,6 +2832,60 @@ function weekRangeLabel(columns: ReturnType<typeof weekColumnsFor>): string {
   return `${first.range} – ${sameMonth ? last.day : last.range}, ${last.year}`;
 }
 
+/** Height of one hour in the week's time grid, in pixels (1px per minute). */
+const HOUR_PX = 60;
+
+function minutesToClock(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function hourLabel(hour: number): string {
+  if (hour === 0 || hour === 24) return "12 AM";
+  if (hour === 12) return "12 PM";
+  return hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
+}
+
+/** Start and end of a session in minutes after local midnight (end capped at midnight). */
+function sessionClockRange(session: PlannedSession) {
+  const start = clockMinutes(localTimeKey(session.start));
+  return { start, end: Math.min(24 * 60, start + session.minutes) };
+}
+
+/** Places overlapping sessions side by side, like Google Calendar. Sessions must be sorted by start. */
+function dayLanes(sessions: PlannedSession[]) {
+  const result = new Map<string, { lane: number; lanes: number }>();
+  let cluster: Array<{ id: string; lane: number; end: number }> = [];
+  let clusterEnd = -1;
+  const flush = () => {
+    const lanes = Math.max(1, ...cluster.map((item) => item.lane + 1));
+    for (const item of cluster) result.set(item.id, { lane: item.lane, lanes });
+    cluster = [];
+  };
+  for (const session of sessions) {
+    const { start, end } = sessionClockRange(session);
+    if (start >= clusterEnd) {
+      flush();
+      clusterEnd = end;
+    } else {
+      clusterEnd = Math.max(clusterEnd, end);
+    }
+    const used = new Set(cluster.filter((item) => item.end > start).map((item) => item.lane));
+    let lane = 0;
+    while (used.has(lane)) lane += 1;
+    cluster.push({ id: session.id, lane, end });
+  }
+  flush();
+  return result;
+}
+
+function timeZoneShortName(): string {
+  return (
+    new Intl.DateTimeFormat("en-US", { timeZone: DEFAULT_PREFERENCES.timeZone, timeZoneName: "short" })
+      .formatToParts(new Date())
+      .find((part) => part.type === "timeZoneName")?.value ?? ""
+  );
+}
+
 type ManualPlacementDraft = {
   sessionId: string;
   date: string;
@@ -2850,6 +2917,9 @@ function ScheduleView() {
   const [expandedReasonIds, setExpandedReasonIds] = useState<string[]>([]);
   const [draggingSessionId, setDraggingSessionId] = useState<string>();
   const [dragTargetDate, setDragTargetDate] = useState<string>();
+  const [dragTargetMinutes, setDragTargetMinutes] = useState<number>();
+  const now = useClock();
+  const gridScrollRef = useRef<HTMLDivElement>(null);
   const [placementDraft, setPlacementDraft] =
     useState<ManualPlacementDraft>();
   const pointerDragRef = useRef<{
@@ -2861,6 +2931,9 @@ function ScheduleView() {
     lastY: number;
     active: boolean;
     targetDate?: string;
+    targetMinutes?: number;
+    grabOffsetY: number;
+    length: number;
   } | undefined>(undefined);
   const latestTaskIds = new Set(lastImportedTaskIds);
   const visibleSessions = proposal.sessions.filter(
@@ -2886,6 +2959,23 @@ function ScheduleView() {
     sessionsByDate.set(key, [...(sessionsByDate.get(key) ?? []), session]);
   }
   const weekSessions = weekColumns.flatMap((day) => sessionsByDate.get(day.date) ?? []);
+  // Hours shown in the grid: your usual day, stretched to fit any session outside it.
+  const gridStart = Math.floor(
+    Math.min(clockMinutes(DEFAULT_PREFERENCES.wakingTime), ...visibleSessions.map((session) => sessionClockRange(session).start)) / 60,
+  ) * 60;
+  const gridEnd = Math.min(
+    24 * 60,
+    Math.ceil(
+      Math.max(clockMinutes(DEFAULT_PREFERENCES.sleepingTime), ...visibleSessions.map((session) => sessionClockRange(session).end)) / 60,
+    ) * 60,
+  );
+  const gridHours = Array.from({ length: (gridEnd - gridStart) / 60 }, (_, index) => gridStart / 60 + index);
+  const todayKey = localDateKey();
+  const nowDateKey = now === undefined ? undefined : localDateKey(new Date(now));
+  const nowMinute = now === undefined ? undefined : clockMinutes(localTimeKey(new Date(now)));
+  const firstWeekMinute = weekSessions.length
+    ? Math.min(...weekSessions.map((session) => sessionClockRange(session).start))
+    : clockMinutes("09:00");
   const allReasonsExpanded =
     weekSessions.length > 0 &&
     weekSessions.every((session) => expandedReasonIds.includes(session.id));
@@ -2945,6 +3035,7 @@ function ScheduleView() {
   const resetDrag = useCallback(() => {
     setDraggingSessionId(undefined);
     setDragTargetDate(undefined);
+    setDragTargetMinutes(undefined);
   }, []);
   const beginPointerDrag = (
     session: PlannedSession,
@@ -2965,6 +3056,8 @@ function ScheduleView() {
       lastX: event.clientX,
       lastY: event.clientY,
       active: false,
+      grabOffsetY: event.clientY - event.currentTarget.getBoundingClientRect().top,
+      length: session.minutes,
     };
   };
   const scheduleDateAtPoint = useCallback((clientX: number, clientY: number) => {
@@ -2985,6 +3078,32 @@ function ScheduleView() {
       );
     })?.dataset.scheduleDate;
   }, []);
+  /** Start time (minutes after midnight, 15-minute steps) under the pointer in a day's time grid. */
+  const gridMinutesAtPoint = useCallback(
+    (date: string, clientY: number, grabOffsetY: number, length: number) => {
+      const grid = document.querySelector<HTMLElement>(`[data-schedule-date="${date}"] .day-grid`);
+      if (!grid) return undefined;
+      const bounds = grid.getBoundingClientRect();
+      const start = Number(grid.dataset.gridStart);
+      const end = Number(grid.dataset.gridEnd);
+      const raw = start + ((clientY - grabOffsetY - bounds.top) * 60) / HOUR_PX;
+      return Math.max(start, Math.min(end - length, Math.round(raw / 15) * 15));
+    },
+    [],
+  );
+  const updateDragTarget = useCallback(
+    (clientX: number, clientY: number) => {
+      const current = pointerDragRef.current;
+      if (!current) return;
+      current.lastX = clientX;
+      current.lastY = clientY;
+      current.targetDate = scheduleDateAtPoint(clientX, clientY);
+      current.targetMinutes = current.targetDate
+        ? gridMinutesAtPoint(current.targetDate, clientY, current.grabOffsetY, current.length)
+        : undefined;
+    },
+    [gridMinutesAtPoint, scheduleDateAtPoint],
+  );
   const continuePointerDrag = (event: ReactPointerEvent<HTMLElement>) => {
     const current = pointerDragRef.current;
     if (!current || current.pointerId !== event.pointerId) return;
@@ -3004,11 +3123,9 @@ function ScheduleView() {
       setDraggingSessionId(current.sessionId);
     }
     event.preventDefault();
-    const date = scheduleDateAtPoint(event.clientX, event.clientY);
-    if (date !== current.targetDate) {
-      current.targetDate = date;
-      setDragTargetDate(date);
-    }
+    updateDragTarget(event.clientX, event.clientY);
+    setDragTargetDate(current.targetDate);
+    setDragTargetMinutes(current.targetMinutes);
   };
   const completePointerDrag = useCallback(() => {
     const current = pointerDragRef.current;
@@ -3023,7 +3140,9 @@ function ScheduleView() {
         openPlacement(
           session,
           targetDate,
-          localTimeKey(session.start),
+          current.targetMinutes !== undefined
+            ? minutesToClock(current.targetMinutes)
+            : localTimeKey(session.start),
         );
       }
     }
@@ -3033,9 +3152,7 @@ function ScheduleView() {
   const finishPointerDrag = (event: ReactPointerEvent<HTMLElement>) => {
     const current = pointerDragRef.current;
     if (!current || current.pointerId !== event.pointerId) return;
-    current.lastX = event.clientX;
-    current.lastY = event.clientY;
-    current.targetDate = scheduleDateAtPoint(event.clientX, event.clientY);
+    if (current.active) updateDragTarget(event.clientX, event.clientY);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -3062,18 +3179,22 @@ function ScheduleView() {
     if (!draggingSessionId) return;
     const finishAtWindow = (event: PointerEvent) => {
       if (pointerDragRef.current?.pointerId === event.pointerId) {
-        pointerDragRef.current.lastX = event.clientX;
-        pointerDragRef.current.lastY = event.clientY;
-        pointerDragRef.current.targetDate = scheduleDateAtPoint(
-          event.clientX,
-          event.clientY,
-        );
+        updateDragTarget(event.clientX, event.clientY);
         completePointerDrag();
       }
     };
     window.addEventListener("pointerup", finishAtWindow, true);
     return () => window.removeEventListener("pointerup", finishAtWindow, true);
-  }, [draggingSessionId, completePointerDrag, scheduleDateAtPoint]);
+  }, [draggingSessionId, completePointerDrag, updateDragTarget]);
+
+  // Open each week scrolled to just before its first session (or the current time).
+  const scrollTargetMinute =
+    weekOffset === 0 && nowMinute !== undefined ? Math.min(firstWeekMinute, nowMinute) : firstWeekMinute;
+  useEffect(() => {
+    const grid = gridScrollRef.current;
+    if (!grid || mode !== "week") return;
+    grid.scrollTop = Math.max(0, ((scrollTargetMinute - 60 - gridStart) * HOUR_PX) / 60);
+  }, [gridStart, mode, scrollTargetMinute, weekOffset, tasks.length]);
 
   const placementSession = placementDraft
     ? proposal.sessions.find(
@@ -3348,50 +3469,104 @@ function ScheduleView() {
         </Button>
       </div>
       {mode === "week" ? (
-        <div className="week-board">
-          {weekColumns.map((day) => {
-            const sessions = sessionsByDate.get(day.date) ?? [];
-            return (
-              <div
-                className={`week-column ${draggingSessionId ? "drag-ready" : ""} ${dragTargetDate === day.date ? "drag-target" : ""}`}
-                key={day.date}
-                data-schedule-date={day.date}
-              >
-                <header className={day.date === localDateKey() ? "today" : ""}>
-                  <span>{day.label}</span><strong>{day.day}</strong>
-                  {day.date === localDateKey() && <small>Today</small>}
-                </header>
-                <div className="day-capacity"><i style={{ width: `${Math.min(100, sessions.length * 24)}%` }} /><span>{sessions.length > 0 ? `${sessions.reduce((sum, session) => sum + session.minutes, 0)} min` : "Free"}</span></div>
-                <div className="day-sessions">
-                  {sessions.map((session) => (
-                    <div key={session.id}>
-                      <ScheduleSessionCard
-                        session={session}
-                        onMove={openPlacement}
-                        onSessionPointerDown={(event) =>
-                          beginPointerDrag(session, event)
-                        }
-                        onSessionPointerMove={continuePointerDrag}
-                        onSessionPointerUp={finishPointerDrag}
-                        onSessionPointerCancel={cancelPointerDrag}
-                        onSessionLostPointerCapture={completePointerDrag}
-                        reasonExpanded={expandedReasonIds.includes(session.id)}
-                        onReasonExpandedChange={(expanded) =>
-                          setReasonExpanded(session.id, expanded)
-                        }
-                      />
-                    </div>
-                  ))}
-                  {draggingSessionId && (
-                    <div className="day-drop-prompt" aria-hidden="true">
-                      <MoveRight size={16} />
-                      <strong>{day.label} {day.day}</strong>
-                    </div>
-                  )}
+        <div
+          className={`time-grid ${draggingSessionId ? "is-dragging" : ""}`}
+          ref={gridScrollRef}
+          style={{ "--hour-px": `${HOUR_PX}px` } as React.CSSProperties}
+        >
+          <div className="time-grid-head">
+            <div className="time-grid-corner">{timeZoneShortName()}</div>
+            {weekColumns.map((day) => {
+              const minutes = (sessionsByDate.get(day.date) ?? []).reduce((sum, session) => sum + session.minutes, 0);
+              return (
+                <div className={`time-grid-day ${day.date === todayKey ? "today" : ""}`} key={day.date}>
+                  <span>{day.label}</span>
+                  <strong>{day.day}</strong>
+                  <small>{minutes > 0 ? `${minutes} min` : "Free"}</small>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+          <div className="time-grid-body">
+            <div className="time-gutter" style={{ height: ((gridEnd - gridStart) * HOUR_PX) / 60 }} aria-hidden="true">
+              {gridHours.map((hour) => (
+                <span key={hour} style={{ top: (hour * 60 - gridStart) * (HOUR_PX / 60) }}>
+                  {hour * 60 === gridStart ? "" : hourLabel(hour)}
+                </span>
+              ))}
+            </div>
+            {weekColumns.map((day) => {
+              const sessions = sessionsByDate.get(day.date) ?? [];
+              const lanes = dayLanes(sessions);
+              const draggedSession = draggingSessionId
+                ? proposal.sessions.find((item) => item.id === draggingSessionId)
+                : undefined;
+              return (
+                <div
+                  className={`time-grid-col ${day.date === todayKey ? "today" : ""} ${dragTargetDate === day.date ? "drag-target" : ""}`}
+                  key={day.date}
+                  data-schedule-date={day.date}
+                >
+                  <div
+                    className="day-grid"
+                    data-grid-start={gridStart}
+                    data-grid-end={gridEnd}
+                    style={{ height: ((gridEnd - gridStart) * HOUR_PX) / 60 }}
+                  >
+                    {sessions.map((session) => {
+                      const { start, end } = sessionClockRange(session);
+                      const lane = lanes.get(session.id) ?? { lane: 0, lanes: 1 };
+                      const expanded = expandedReasonIds.includes(session.id);
+                      return (
+                        <div
+                          key={session.id}
+                          className={`grid-session ${expanded ? "is-expanded" : ""} ${end - start < 40 ? "is-short" : ""} ${draggingSessionId === session.id ? "is-dragged" : ""}`}
+                          style={{
+                            top: ((start - gridStart) * HOUR_PX) / 60,
+                            height: Math.max(22, ((end - start) * HOUR_PX) / 60),
+                            left: `calc(${(lane.lane / lane.lanes) * 100}% + 2px)`,
+                            width: `calc(${100 / lane.lanes}% - 5px)`,
+                          }}
+                        >
+                          <ScheduleSessionCard
+                            session={session}
+                            selectable={false}
+                            onMove={openPlacement}
+                            onSessionPointerDown={(event) =>
+                              beginPointerDrag(session, event)
+                            }
+                            onSessionPointerMove={continuePointerDrag}
+                            onSessionPointerUp={finishPointerDrag}
+                            onSessionPointerCancel={cancelPointerDrag}
+                            onSessionLostPointerCapture={completePointerDrag}
+                            reasonExpanded={expanded}
+                            onReasonExpandedChange={(open) =>
+                              setReasonExpanded(session.id, open)
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                    {draggedSession && dragTargetDate === day.date && dragTargetMinutes !== undefined && (
+                      <div
+                        className="grid-drop-ghost"
+                        aria-hidden="true"
+                        style={{
+                          top: ((dragTargetMinutes - gridStart) * HOUR_PX) / 60,
+                          height: (draggedSession.minutes * HOUR_PX) / 60,
+                        }}
+                      >
+                        {hourLabel(Math.floor(dragTargetMinutes / 60)).replace(" ", `:${String(dragTargetMinutes % 60).padStart(2, "0")} `)}
+                      </div>
+                    )}
+                    {nowDateKey === day.date && nowMinute !== undefined && nowMinute >= gridStart && nowMinute <= gridEnd && (
+                      <div className="grid-now-line" style={{ top: ((nowMinute - gridStart) * HOUR_PX) / 60 }} aria-hidden="true" />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       ) : (
         <div className="schedule-list-view">

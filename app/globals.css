@@ -1467,3 +1467,41 @@ p.source-quote { font-family: inherit; font-size: var(--text-sm); color: var(--m
 .session-row .session-status, .session-row .session-quick-approve { grid-column: 3; grid-row: 1; }
 .session-row .session-expand { grid-column: 4; grid-row: 1; }
 .session-quick-approve, .session-expand { height: 22px; width: 22px; }
+
+/* ── Schedule: Google Calendar–style time grid (hours on the left) ── */
+.time-grid { --gutter: 58px; background: var(--surface-solid); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--radius-md) var(--radius-md); max-height: max(460px, calc(100dvh - 250px)); overflow: auto; overscroll-behavior: contain; position: relative; }
+.time-grid-head, .time-grid-body { display: grid; grid-template-columns: var(--gutter) repeat(7, minmax(112px, 1fr)); min-width: calc(var(--gutter) + 7 * 112px); }
+.time-grid-head { background: var(--surface-solid); border-bottom: 1px solid var(--line-strong); position: sticky; top: 0; z-index: 8; }
+.time-grid-corner { align-items: flex-end; background: var(--surface-solid); color: var(--faint); display: flex; font-size: 10px; font-weight: 650; justify-content: center; left: 0; padding-bottom: 10px; position: sticky; z-index: 1; }
+.time-grid-day { align-items: center; border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 1px; padding: 8px 4px; }
+.time-grid-day span { color: var(--faint); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.time-grid-day strong { align-items: center; border-radius: 50%; display: flex; font-family: var(--font-display); font-size: 20px; font-variant-numeric: tabular-nums; height: 34px; justify-content: center; line-height: 1; width: 34px; }
+.time-grid-day.today span { color: var(--brand-ink); }
+.time-grid-day.today strong { background: var(--grad-primary); box-shadow: var(--glow-accent); color: #fff; }
+.time-grid-day small { color: var(--faint); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.time-gutter { background: var(--surface-solid); left: 0; position: sticky; z-index: 6; }
+.time-gutter span { color: var(--faint); font-size: 10.5px; font-variant-numeric: tabular-nums; position: absolute; right: 8px; transform: translateY(-50%); white-space: nowrap; }
+.time-grid-col { border-left: 1px solid var(--line); position: relative; transition: background var(--dur-fast) var(--ease); }
+.time-grid-col.today { background: color-mix(in srgb, var(--brand-soft) 45%, transparent); }
+.time-grid-col.drag-target { background: var(--brand-soft); }
+.day-grid {
+  background-image:
+    repeating-linear-gradient(180deg, var(--line) 0 1px, transparent 1px var(--hour-px)),
+    repeating-linear-gradient(180deg, transparent 0 calc(var(--hour-px) / 2), color-mix(in srgb, var(--line) 45%, transparent) calc(var(--hour-px) / 2) calc(var(--hour-px) / 2 + 1px), transparent calc(var(--hour-px) / 2 + 1px) var(--hour-px));
+  position: relative;
+}
+.grid-session { position: absolute; z-index: 2; }
+.grid-session > .schedule-session { background: color-mix(in srgb, var(--accent) 20%, var(--surface-solid)); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); height: 100%; padding: 4px 4px 4px 9px; }
+.grid-session > .schedule-session.session-proposed { border-style: dashed; background: color-mix(in srgb, var(--accent) 10%, var(--surface-solid)); }
+.grid-session .session-row { row-gap: 0; }
+.grid-session .schedule-session h3 { font-size: 12px; line-height: 1.25; }
+.grid-session .session-when { font-size: 10.5px; }
+.grid-session.is-short > .schedule-session { padding-bottom: 1px; padding-top: 1px; }
+.grid-session.is-short .session-when { display: none; }
+.grid-session.is-short .session-row h3 { grid-column: 2; grid-row: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid-session.is-expanded { height: auto !important; z-index: 7; }
+.grid-session.is-expanded > .schedule-session { box-shadow: var(--shadow-md); height: auto; }
+.grid-session.is-dragged { opacity: 0.45; }
+.grid-drop-ghost { background: color-mix(in srgb, var(--brand-soft) 80%, transparent); border: 1.5px dashed var(--accent); border-radius: var(--radius-xs); color: var(--brand-ink); font-size: 11px; font-weight: 700; left: 2px; padding: 3px 6px; pointer-events: none; position: absolute; right: 3px; z-index: 5; }
+.grid-now-line { background: var(--red); height: 2px; left: -1px; pointer-events: none; position: absolute; right: 0; z-index: 6; }
+.grid-now-line::before { background: var(--red); border-radius: 50%; content: ""; height: 10px; left: -5px; position: absolute; top: -4px; width: 10px; }
