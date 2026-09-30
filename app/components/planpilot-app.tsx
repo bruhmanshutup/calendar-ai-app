@@ -2731,7 +2731,8 @@ export function ScheduleSessionCard({
         )}
         <div className="session-main">
           <span className="session-when" title={`${formatTime(session.start)}–${formatTime(session.end)}`}>{compactTimeRange(session.start, session.end)}</span>
-          <h3>{session.title}</h3>
+          {/* Non-breaking hyphens keep course codes like "220-2" on one line. */}
+          <h3>{session.title.replace(/(\w)-(\w)/g, "$1‑$2")}</h3>
         </div>
         {session.status === "proposed" ? (
           <button
@@ -3523,7 +3524,7 @@ function ScheduleView() {
                           className={`grid-session ${expanded ? "is-expanded" : ""} ${end - start < 40 ? "is-short" : ""} ${draggingSessionId === session.id ? "is-dragged" : ""}`}
                           style={{
                             top: ((start - gridStart) * HOUR_PX) / 60,
-                            height: Math.max(22, ((end - start) * HOUR_PX) / 60),
+                            minHeight: Math.max(22, ((end - start) * HOUR_PX) / 60),
                             left: `calc(${(lane.lane / lane.lanes) * 100}% + 2px)`,
                             width: `calc(${100 / lane.lanes}% - 5px)`,
                           }}
