@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
+import { Geist, Geist_Mono, Instrument_Serif, Inter, Space_Grotesk } from "next/font/google";
 import { PlanPilotProvider } from "./components/planpilot-provider";
 import "./globals.css";
+// "Studio" look for the signed-in app. Delete this line (and studio-look.css) to remove it entirely.
+import "./studio-look.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,6 +23,21 @@ const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+// Studio look fonts: Inter for interface text, Instrument Serif italic for one accent word per heading.
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  display: "swap",
+});
+
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-instrument-serif",
+  subsets: ["latin"],
+  weight: "400",
+  style: "italic",
   display: "swap",
 });
 
@@ -76,9 +93,16 @@ export default function RootLayout({
               "try{if(localStorage.getItem('planpilot-theme')!=='light'){document.documentElement.classList.add('dark')}}catch(e){document.documentElement.classList.add('dark')}",
           }}
         />
+        {/* Apply the saved app look ("studio" by default, or "classic") before first paint. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{document.documentElement.dataset.look=localStorage.getItem('planpilot-look')==='classic'?'classic':'studio'}catch(e){document.documentElement.dataset.look='studio'}",
+          }}
+        />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${inter.variable} ${instrumentSerif.variable} antialiased`}
       >
         <PlanPilotProvider>{children}</PlanPilotProvider>
       </body>
