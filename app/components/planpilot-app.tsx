@@ -105,7 +105,6 @@ import {
   usePlanPilot,
 } from "./planpilot-provider";
 import { LandingExperience } from "./landing";
-import { LookToggle, StudioSparkle, TabWave } from "./studio-look";
 import {
   AppBackdrop,
   PlanOrbit,
@@ -178,19 +177,6 @@ function formatTime(value: string): string {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-/** Short calendar-style range: "10–10:50am", "11:30am–12:20pm". */
-function compactTimeRange(start: string, end: string): string {
-  const part = (value: string) => {
-    const [clock, meridiem] = formatTime(value).split(" ");
-    return { clock: clock.replace(/:00$/, ""), meridiem: (meridiem ?? "").toLowerCase() };
-  };
-  const from = part(start);
-  const to = part(end);
-  return from.meridiem === to.meridiem
-    ? `${from.clock}–${to.clock}${to.meridiem}`
-    : `${from.clock}${from.meridiem}–${to.clock}${to.meridiem}`;
 }
 
 function formatDay(value: string, long = false): string {
@@ -735,8 +721,6 @@ function DockMoreMenu({ view }: { view: PlanPilotView }) {
               </Link>
             );
           })}
-          <div className="dock-more-divider" role="separator" />
-          <LookToggle onDone={() => setOpen(false)} />
         </div>
       )}
     </div>
@@ -896,7 +880,6 @@ function AppShell({
               </Link>
             );
           })}
-          <LookToggle menuItem={false} onDone={closeDrawer} />
           <button onClick={toggleTheme} className="sidebar-action" aria-pressed={theme === "dark"}>
             {theme === "light" ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}
             <span>{theme === "light" ? "Dark mode" : "Light mode"}</span>
@@ -916,7 +899,6 @@ function AppShell({
         </div>
       </aside>
       <main className="app-main">
-        <TabWave view={view} />
         <header className="app-topbar">
           <button
             className="mobile-menu"
@@ -1127,18 +1109,6 @@ function OnboardingView() {
   );
 }
 
-/** Splits off the last word so the studio look can set it in italic serif. */
-function headingWithAccent(title: string): ReactNode {
-  const cut = title.lastIndexOf(" ");
-  if (cut < 0) return title;
-  return (
-    <>
-      {title.slice(0, cut + 1)}
-      <em>{title.slice(cut + 1)}</em>
-    </>
-  );
-}
-
 function PageHeading({
   eyebrow,
   title,
@@ -1156,11 +1126,10 @@ function PageHeading({
         {eyebrow && (
           <span className="eyebrow">
             <WaypointDots />
-            <StudioSparkle className="eyebrow-star" />
             {eyebrow}
           </span>
         )}
-        <h1>{headingWithAccent(title)}</h1>
+        <h1>{title}</h1>
         {detail && <p>{detail}</p>}
       </div>
       {actions && <div className="page-actions">{actions}</div>}
@@ -2748,7 +2717,7 @@ export function ScheduleSessionCard({
           </label>
         )}
         <div className="session-main">
-          <span className="session-when" title={`${formatTime(session.start)}–${formatTime(session.end)}`}>{compactTimeRange(session.start, session.end)}</span>
+          <span className="session-when">{formatTime(session.start)}–{formatTime(session.end)}</span>
           <h3>{session.title}</h3>
         </div>
         {session.status === "proposed" ? (
@@ -2878,12 +2847,6 @@ function ScheduleView() {
   const [mode, setMode] = useState<"week" | "list">("week");
   const [scope, setScope] = useState<"recent" | "all">("all");
   const [weekOffset, setWeekOffset] = useState(0);
-  const [pageTurn, setPageTurn] = useState<{ direction: "next" | "prev"; count: number }>();
-  const turnWeek = (delta: number) => {
-    if (delta === 0) return;
-    setWeekOffset((value) => value + delta);
-    setPageTurn((current) => ({ direction: delta > 0 ? "next" : "prev", count: (current?.count ?? 0) + 1 }));
-  };
   const [expandedReasonIds, setExpandedReasonIds] = useState<string[]>([]);
   const [draggingSessionId, setDraggingSessionId] = useState<string>();
   const [dragTargetDate, setDragTargetDate] = useState<string>();
@@ -2923,13 +2886,6 @@ function ScheduleView() {
     sessionsByDate.set(key, [...(sessionsByDate.get(key) ?? []), session]);
   }
   const weekSessions = weekColumns.flatMap((day) => sessionsByDate.get(day.date) ?? []);
-  const weekMinutes = weekSessions.reduce((sum, session) => sum + session.minutes, 0);
-  const busiestDay = weekColumns.reduce<{ label: string; minutes: number } | undefined>((best, day) => {
-    const minutes = (sessionsByDate.get(day.date) ?? []).reduce((sum, session) => sum + session.minutes, 0);
-    return minutes > (best?.minutes ?? 0) ? { label: day.label, minutes } : best;
-  }, undefined);
-  const freeDays = weekColumns.filter((day) => !sessionsByDate.has(day.date)).map((day) => day.label);
-  const weekProposed = weekSessions.filter((session) => session.status === "proposed").length;
   const allReasonsExpanded =
     weekSessions.length > 0 &&
     weekSessions.every((session) => expandedReasonIds.includes(session.id));
@@ -3344,15 +3300,15 @@ function ScheduleView() {
       )}
       <div className="schedule-toolbar">
         <div className="week-nav" role="group" aria-label="Choose week">
-          <button type="button" className="icon-button" onClick={() => turnWeek(-1)} aria-label="Previous week" title="Previous week">
+          <button type="button" className="icon-button" onClick={() => setWeekOffset((value) => value - 1)} aria-label="Previous week" title="Previous week">
             <ChevronLeft size={18} aria-hidden="true" />
           </button>
-          <button type="button" className="icon-button" onClick={() => turnWeek(1)} aria-label="Next week" title="Next week">
+          <button type="button" className="icon-button" onClick={() => setWeekOffset((value) => value + 1)} aria-label="Next week" title="Next week">
             <ChevronRight size={18} aria-hidden="true" />
           </button>
           <h2 className="week-nav-range" aria-live="polite">{weekRangeLabel(weekColumns)}</h2>
           {weekOffset !== 0 && (
-            <button type="button" className="week-nav-today" onClick={() => turnWeek(-weekOffset)}>
+            <button type="button" className="week-nav-today" onClick={() => setWeekOffset(0)}>
               This week
             </button>
           )}
@@ -3436,24 +3392,6 @@ function ScheduleView() {
               </div>
             );
           })}
-          <aside className="week-notes" aria-label="Week notes">
-            <header><span>Notes</span></header>
-            <dl>
-              <div><dt>Planned</dt><dd>{Math.floor(weekMinutes / 60)}h {weekMinutes % 60}m</dd></div>
-              <div><dt>Sessions</dt><dd>{weekSessions.length}</dd></div>
-              {busiestDay && <div><dt>Busiest</dt><dd>{busiestDay.label}</dd></div>}
-              <div><dt>Free</dt><dd>{freeDays.length ? freeDays.join(", ") : "None"}</dd></div>
-              {weekProposed > 0 && <div><dt>To approve</dt><dd>{weekProposed}</dd></div>}
-            </dl>
-            <p className="week-notes-lines" aria-hidden="true" />
-          </aside>
-          {pageTurn && (
-            <div
-              key={pageTurn.count}
-              className={`page-leaf page-leaf-${pageTurn.direction}`}
-              aria-hidden="true"
-            />
-          )}
         </div>
       ) : (
         <div className="schedule-list-view">

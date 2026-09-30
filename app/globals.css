@@ -642,7 +642,7 @@ input[type="date"], input[type="time"], input[type="datetime-local"] { color-sch
    ========================================================================= */
 .import-layout { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) 340px; }
 .import-panel { padding: 24px; }
-.tab-list { border-bottom: 1px solid var(--line); display: flex; gap: 4px; margin: -4px -4px 20px; overflow-x: auto; overflow-y: hidden; }
+.tab-list { border-bottom: 1px solid var(--line); display: flex; gap: 4px; margin: -4px -4px 20px; overflow-x: auto; }
 .tab-list button { align-items: center; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); display: flex; font-size: var(--text-sm); font-weight: 620; gap: 8px; margin-bottom: -1px; min-height: 44px; padding: 8px 14px; white-space: nowrap; transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
 .tab-list button:hover { color: var(--ink); }
 .tab-list button.active { border-image: var(--grad-aurora) 1; border-bottom-width: 2px; color: var(--ink); }
