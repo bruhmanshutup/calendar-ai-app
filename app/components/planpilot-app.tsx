@@ -2732,7 +2732,7 @@ export function ScheduleSessionCard({
         <div className="session-main">
           <span className="session-when" title={`${formatTime(session.start)}–${formatTime(session.end)}`}>{compactTimeRange(session.start, session.end)}</span>
           {/* Non-breaking hyphens keep course codes like "220-2" on one line. */}
-          <h3 title={session.title}>{session.title.replace(/(\w)-(\w)/g, "$1‑$2")}</h3>
+          <h3>{session.title.replace(/(\w)-(\w)/g, "$1‑$2")}</h3>
         </div>
         {session.status === "proposed" ? (
           <button
@@ -2776,12 +2776,15 @@ export function ScheduleSessionCard({
       )}
       {expanded && (
         <div className="session-details">
+          <p className="session-detail-time">
+            <Clock3 size={12} aria-hidden="true" />
+            {formatDay(session.start)} · {formatTime(session.start)}–{formatTime(session.end)} · {session.minutes} min
+          </p>
           <div className="reason-tags" aria-label="Why this time">
             <span className="reason-tags-label">Why</span>
             {session.reasonCodes.slice(0, 3).map((reason) => (
               <span key={reason}>{REASON_LABELS[reason as ScheduleReasonCode] ?? reason}</span>
             ))}
-            <span className="reason-minutes">{session.minutes} min</span>
           </div>
           {note && <p className="session-note">{note}</p>}
           <div className="session-actions">
@@ -3524,12 +3527,10 @@ function ScheduleView() {
                           className={`grid-session ${expanded ? "is-expanded" : ""} ${end - start < 40 ? "is-short" : ""} ${draggingSessionId === session.id ? "is-dragged" : ""}`}
                           style={{
                             top: ((start - gridStart) * HOUR_PX) / 60,
-                            height: Math.max(22, ((end - start) * HOUR_PX) / 60),
-                            // How many lines of the name fit under the time before it is shortened.
-                            "--title-lines": Math.max(1, Math.floor((Math.max(22, ((end - start) * HOUR_PX) / 60) - 20) / 14.4)),
+                            minHeight: Math.max(22, ((end - start) * HOUR_PX) / 60),
                             left: `calc(${(lane.lane / lane.lanes) * 100}% + 2px)`,
                             width: `calc(${100 / lane.lanes}% - 5px)`,
-                          } as React.CSSProperties}
+                          }}
                         >
                           <ScheduleSessionCard
                             session={session}
