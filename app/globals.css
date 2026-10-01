@@ -1553,3 +1553,24 @@ p.source-quote { font-family: inherit; font-size: var(--text-sm); color: var(--m
   background-repeat: repeat-y;
   background-size: 100% var(--hour-px);
 }
+
+/* Time grid (final rules): every event keeps its exact time slot and always
+   shows its time. Long names are shortened to fit; opening an event with its
+   arrow shows the full name. */
+.grid-session:not(.is-expanded) > .schedule-session { height: 100%; overflow: hidden; }
+.grid-session:not(.is-expanded) .session-row h3 {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--title-lines, 2);
+  display: -webkit-box;
+  line-clamp: var(--title-lines, 2);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+/* Short events (under 40 minutes): time and name on one line. */
+.grid-session.is-short:not(.is-expanded) .session-row { align-items: baseline; column-gap: 5px; grid-template-columns: auto minmax(0, 1fr); }
+.grid-session.is-short:not(.is-expanded) .session-when { display: block; grid-column: 1; grid-row: 1; }
+.grid-session.is-short:not(.is-expanded) .session-row h3 { display: block; grid-column: 2; grid-row: 1; text-overflow: ellipsis; white-space: nowrap; }
+/* Opened events show everything, including the time on short ones. */
+.grid-session.is-short.is-expanded .session-when { display: block; grid-column: 2; grid-row: 1; }
+.grid-session.is-short.is-expanded .session-row h3 { grid-column: 1 / -1; grid-row: 2; white-space: normal; }
