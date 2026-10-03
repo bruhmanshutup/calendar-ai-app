@@ -1561,3 +1561,6 @@ p.source-quote { font-family: inherit; font-size: var(--text-sm); color: var(--m
 .grid-session.is-short.is-expanded .session-row h3 { grid-column: 1 / -1; grid-row: 2; }
 .grid-session .session-row h3,
 .grid-session.is-short .session-row h3 { overflow-wrap: break-word; }
+
+/* Landing clock: hover tag naming the hour and activity of an object (copy only). */
+.world-tag { backdrop-filter: blur(10px); background: rgba(14, 13, 20, 0.78); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 999px; color: #efedf5; display: inline-block; font-family: var(--font-geist-sans), system-ui, sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.01em; padding: 6px 12px; white-space: nowrap; }
