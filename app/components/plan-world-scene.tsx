@@ -3,7 +3,7 @@
 import { Environment, Html, useGLTF, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
-import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MutableRefObject } from "react";
 import * as THREE from "three";
 
 /**
@@ -50,10 +50,25 @@ const PAL = {
   amber: "#e0b56f",
   star: "#b9b3cf",
   bluedSteel: "#3d4a7a",
-  gunmetal: "#171c2b",
-  gold: "#d8b25e",
-  teal: "#5ef2e0",
+  bronze: "#4a3523",
+  gold: "#c9a862",
+  glow: "#ffbf6b",
+  lightStage: "#ebe8f1",
 } as const;
+
+/** Follows the page theme (the <html class="dark"> switch) so the scene can turn light. */
+function subscribeTheme(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
+}
+function useLightTheme(): boolean {
+  return useSyncExternalStore(
+    subscribeTheme,
+    () => !document.documentElement.classList.contains("dark"),
+    () => false,
+  );
+}
 
 
 function seededRandom(seed: number) {
@@ -517,11 +532,12 @@ function Platter({
 }: {
   radius?: number;
   tint?: string;
-  top?: "glass" | "felt";
+  top?: "glass" | "felt" | "dial";
   felt?: string;
 }) {
   const geometry = useMemo(() => discGeometry(radius), [radius]);
   const wood = useWalnut(tint);
+  const dial = useMemo(() => (top === "dial" ? dialTexture() : undefined), [top]);
   return (
     <group>
       <mesh geometry={geometry} {...SHADOW}>
@@ -536,6 +552,12 @@ function Platter({
         <torusGeometry args={[radius - 0.22, 0.022, 12, 160]} />
         <Brass roughness={0.22} />
       </mesh>
+      {top === "dial" && dial && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.1185, 0]} receiveShadow>
+          <circleGeometry args={[radius - 0.24, 128]} />
+          <meshPhysicalMaterial map={dial} roughness={0.45} clearcoat={0.5} clearcoatRoughness={0.2} envMapIntensity={0.6} />
+        </mesh>
+      )}
       {top === "felt" && (
         <mesh position={[0, 0.118, 0]} receiveShadow>
           <cylinderGeometry args={[radius - 0.22, radius - 0.22, 0.016, 96]} />
@@ -565,7 +587,9 @@ function Platter({
 /* ------------------------------------------------------------------ */
 /* Clock: enamel dial with Roman numerals, brass hands on a raised post */
 
+let sharedDial: THREE.CanvasTexture | undefined;
 function dialTexture() {
+  if (sharedDial) return sharedDial;
   const size = 1024;
   const c = size / 2;
   const px = c / FACE_R; // pixels per world unit
@@ -633,6 +657,7 @@ function dialTexture() {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
+  sharedDial = texture;
   return texture;
 }
 
@@ -1161,21 +1186,21 @@ function MageRing({ radius, seed, reducedMotion }: { radius: number; seed: numbe
         {segments.map((angle, index) => (
           <group key={index} rotation={[0, angle, 0]}>
             <mesh geometry={geometries.segment} {...SHADOW}>
-              <meshStandardMaterial color={PAL.gunmetal} metalness={0.92} roughness={0.34} envMapIntensity={1.1} />
+              <meshStandardMaterial color={PAL.bronze} metalness={0.9} roughness={0.38} envMapIntensity={1.1} />
             </mesh>
             <mesh geometry={geometries.outerTrim} position={[0, 0.102, 0]} castShadow>
-              <Brass color={PAL.gold} roughness={0.2} />
+              <Brass roughness={0.22} />
             </mesh>
             <mesh geometry={geometries.innerTrim} position={[0, 0.102, 0]}>
-              <Brass color={PAL.gold} roughness={0.2} />
+              <Brass roughness={0.22} />
             </mesh>
             <mesh geometry={geometries.channel} position={[0, 0.108, 0]}>
               <meshStandardMaterial
                 ref={(material) => {
                   if (material) runes.current[index] = material;
                 }}
-                color="#06110f"
-                emissive={PAL.teal}
+                color="#1a0f05"
+                emissive={PAL.glow}
                 emissiveIntensity={2.6}
                 toneMapped={false}
               />
@@ -1187,7 +1212,7 @@ function MageRing({ radius, seed, reducedMotion }: { radius: number; seed: numbe
                 rotation={[0, offset * SEGMENT_ARC + Math.PI / 4, 0]}
               >
                 <boxGeometry args={[0.05, 0.05, 0.05]} />
-                <meshStandardMaterial color="#06110f" emissive={PAL.teal} emissiveIntensity={3.2} toneMapped={false} />
+                <meshStandardMaterial color="#1a0f05" emissive={PAL.glow} emissiveIntensity={3.2} toneMapped={false} />
               </mesh>
             ))}
           </group>
@@ -1197,14 +1222,14 @@ function MageRing({ radius, seed, reducedMotion }: { radius: number; seed: numbe
         {[0, 1, 2].map((index) => (
           <group key={index} rotation={[0, (index / 3) * TAU + 0.5, 0]}>
             <mesh geometry={geometries.shard} castShadow>
-              <meshStandardMaterial color={PAL.gunmetal} metalness={0.92} roughness={0.3} envMapIntensity={1.1} />
+              <meshStandardMaterial color={PAL.bronze} metalness={0.9} roughness={0.34} envMapIntensity={1.1} />
             </mesh>
             <mesh geometry={geometries.shardTrim} position={[0, 0.062, 0]}>
-              <Brass color={PAL.gold} roughness={0.2} />
+              <Brass roughness={0.22} />
             </mesh>
             <mesh position={[radius + 0.38, 0.08, 0]}>
               <boxGeometry args={[0.04, 0.04, 0.04]} />
-              <meshStandardMaterial color="#06110f" emissive={PAL.teal} emissiveIntensity={3} toneMapped={false} />
+              <meshStandardMaterial color="#1a0f05" emissive={PAL.glow} emissiveIntensity={3} toneMapped={false} />
             </mesh>
           </group>
         ))}
@@ -1249,7 +1274,7 @@ function WeekStack({ progressRef, reducedMotion }: { progressRef: MutableRefObje
     <group ref={group}>
       {days.map((entry) => (
         <group key={entry.day}>
-          <Platter tint={entry.day % 2 === 0 ? "#cfb393" : "#b89a7c"} top="felt" felt={entry.day % 2 === 0 ? PAL.felt : PAL.feltAlt} />
+          <Platter tint={entry.day % 2 === 0 ? "#d9c3a8" : "#cdb59a"} top="dial" />
           <MageRing radius={R + 0.5} seed={entry.day} reducedMotion={reducedMotion} />
           {entry.items.map((item, index) => (
             <group key={index} position={[item.x, STACK_ITEM_Y, item.z]} rotation={[0, item.yaw, 0]} scale={0.85}>
@@ -1262,7 +1287,7 @@ function WeekStack({ progressRef, reducedMotion }: { progressRef: MutableRefObje
   );
 }
 
-function Stars({ reducedMotion }: { reducedMotion: boolean }) {
+function Stars({ reducedMotion, visible }: { reducedMotion: boolean; visible: boolean }) {
   const ref = useRef<THREE.Points>(null);
   const positions = useMemo(() => {
     const random = seededRandom(42);
@@ -1282,7 +1307,7 @@ function Stars({ reducedMotion }: { reducedMotion: boolean }) {
     if (ref.current && !reducedMotion) ref.current.rotation.y += delta * 0.008;
   });
   return (
-    <points ref={ref}>
+    <points ref={ref} visible={visible}>
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
@@ -1321,6 +1346,8 @@ export default function PlanWorldScene(props: PlanWorldProps) {
     lastY: 0,
     dragged: false,
   });
+  const light = useLightTheme();
+  const stage = light ? PAL.lightStage : PAL.fog;
   return (
     <Canvas
       shadows="soft"
@@ -1330,9 +1357,9 @@ export default function PlanWorldScene(props: PlanWorldProps) {
       frameloop="always"
       style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
     >
-      <color attach="background" args={[PAL.fog]} />
-      <fog attach="fog" args={[PAL.fog, 15, 36]} />
-      <hemisphereLight args={["#c4bfdb", "#1d1b26", 0.35]} />
+      <color attach="background" args={[stage]} />
+      <fog attach="fog" args={[stage, 15, 36]} />
+      <hemisphereLight args={light ? ["#ffffff", "#cfc9dc", 0.75] : ["#c4bfdb", "#1d1b26", 0.35]} />
       <directionalLight
         position={[4, 10, 5]}
         intensity={2.4}
@@ -1352,11 +1379,11 @@ export default function PlanWorldScene(props: PlanWorldProps) {
       {/* Invisible floor that only shows the shadows */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.6, 0]} receiveShadow>
         <planeGeometry args={[60, 60]} />
-        <shadowMaterial opacity={0.35} />
+        <shadowMaterial opacity={light ? 0.18 : 0.35} />
       </mesh>
       <OrbitInput orbitRef={orbitRef} interactive={props.interactive} onFirstDrag={props.onFirstDrag} />
       <CameraRig {...props} orbitRef={orbitRef} />
-      <Stars reducedMotion={props.reducedMotion} />
+      <Stars reducedMotion={props.reducedMotion} visible={!light} />
       <Suspense fallback={null}>
         <World {...props} />
       </Suspense>

@@ -1303,7 +1303,7 @@ p.source-quote { font-family: inherit; font-size: var(--text-sm); color: var(--m
 .beat-copy { max-width: 540px; opacity: 0; transform: translateY(40px); transition: opacity 700ms var(--ease), transform 900ms var(--ease); will-change: opacity, transform; position: relative; }
 .beat-copy::before { content: ""; position: absolute; inset: -60px -80px; background: radial-gradient(60% 60% at 40% 50%, color-mix(in srgb, var(--page) 72%, transparent), transparent 100%); filter: blur(10px); z-index: -1; pointer-events: none; }
 .beat-copy h1, .beat-copy h2 { text-shadow: 0 2px 30px rgba(5, 4, 12, 0.6); }
-:root:not(.dark) .beat-copy h1, :root:not(.dark) .beat-copy h2 { text-shadow: 0 2px 30px rgba(243, 241, 251, 0.9); }
+:root:not(.dark) .beat-copy h1, :root:not(.dark) .beat-copy h2 { text-shadow: none; }
 .beat.is-visible .beat-copy { opacity: 1; transform: none; }
 .beat-copy { transition: opacity 450ms var(--ease), transform 600ms var(--ease); }
 .beat-right .beat-sticky { justify-content: flex-end; }
