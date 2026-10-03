@@ -1,21 +1,18 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { getDb } from "@/db";
-import { workspaceStates } from "@/db/schema";
+import {
+  deleteWorkspaceState,
+  readWorkspaceState,
+  writeWorkspaceState,
+} from "@/db";
 import { parsePersistedWorkspace } from "@/lib/domain/workspace-state";
 
 const WORKSPACE_ID = "owner";
 const MAX_STATE_BYTES = 2_000_000;
 
 export async function GET() {
-  const db = await getDb();
-  const [record] = await db
-    .select({ stateJson: workspaceStates.stateJson })
-    .from(workspaceStates)
-    .where(eq(workspaceStates.id, WORKSPACE_ID))
-    .limit(1);
+  const stateJson = await readWorkspaceState(WORKSPACE_ID);
 
-  if (!record) {
+  if (!stateJson) {
     return NextResponse.json(
       { state: null },
       { headers: { "Cache-Control": "no-store" } },
@@ -24,7 +21,7 @@ export async function GET() {
 
   try {
     return NextResponse.json(
-      { state: parsePersistedWorkspace(JSON.parse(record.stateJson)) },
+      { state: parsePersistedWorkspace(JSON.parse(stateJson)) },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {
@@ -47,21 +44,7 @@ export async function PUT(request: Request) {
   try {
     const body = JSON.parse(bodyText) as { state?: unknown };
     const state = parsePersistedWorkspace(body.state);
-    const db = await getDb();
-    await db
-      .insert(workspaceStates)
-      .values({
-        id: WORKSPACE_ID,
-        stateJson: JSON.stringify(state),
-        updatedAt: new Date().toISOString(),
-      })
-      .onConflictDoUpdate({
-        target: workspaceStates.id,
-        set: {
-          stateJson: JSON.stringify(state),
-          updatedAt: new Date().toISOString(),
-        },
-      });
+    await writeWorkspaceState(WORKSPACE_ID, JSON.stringify(state));
 
     return NextResponse.json({ saved: true });
   } catch (error) {
@@ -80,7 +63,6 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE() {
-  const db = await getDb();
-  await db.delete(workspaceStates).where(eq(workspaceStates.id, WORKSPACE_ID));
+  await deleteWorkspaceState(WORKSPACE_ID);
   return NextResponse.json({ cleared: true });
 }
