@@ -5,6 +5,7 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber"
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MutableRefObject } from "react";
 import * as THREE from "three";
+import { MageRing } from "./mage-ring";
 
 /**
  * PlanWorld — the full-screen, scroll-driven 3D story behind the landing page.
@@ -1116,129 +1117,6 @@ function Items({ progressRef, reducedMotion, interactive }: PlanWorldProps) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Magepunk rings around the stacked week (dark metal, gold filigree,  */
-/* glowing teal energy channels, floating shards)                      */
-
-/** A flat ring segment (annular arc) with bevelled edges, bottom at y = 0. */
-function arcSegmentGeometry(inner: number, outer: number, arc: number, depth: number) {
-  const shape = new THREE.Shape();
-  shape.absarc(0, 0, outer, -arc / 2, arc / 2, false);
-  shape.absarc(0, 0, inner, arc / 2, -arc / 2, true);
-  const geometry = new THREE.ExtrudeGeometry(shape, {
-    depth,
-    bevelEnabled: true,
-    bevelThickness: 0.012,
-    bevelSize: 0.012,
-    bevelSegments: 3,
-    curveSegments: 28,
-  });
-  geometry.rotateX(-Math.PI / 2);
-  geometry.translate(0, 0.012, 0);
-  return geometry;
-}
-
-/** A thin flat arc of tube, centred on +x, lying in the XZ plane. */
-function flatArcGeometry(radius: number, tube: number, arc: number) {
-  const geometry = new THREE.TorusGeometry(radius, tube, 10, 56, arc);
-  geometry.rotateZ(-arc / 2);
-  geometry.rotateX(-Math.PI / 2);
-  return geometry;
-}
-
-const SEGMENTS = 6;
-const SEGMENT_ARC = (TAU / SEGMENTS) * 0.74;
-
-function MageRing({ radius, seed, reducedMotion }: { radius: number; seed: number; reducedMotion: boolean }) {
-  const ring = useRef<THREE.Group>(null);
-  const shards = useRef<THREE.Group>(null);
-  const runes = useRef<THREE.MeshStandardMaterial[]>([]);
-  const geometries = useMemo(
-    () => ({
-      segment: arcSegmentGeometry(radius - 0.26, radius, SEGMENT_ARC, 0.09),
-      outerTrim: flatArcGeometry(radius + 0.006, 0.018, SEGMENT_ARC),
-      innerTrim: flatArcGeometry(radius - 0.266, 0.013, SEGMENT_ARC),
-      channel: flatArcGeometry(radius - 0.13, 0.014, SEGMENT_ARC * 0.84),
-      shard: arcSegmentGeometry(radius + 0.3, radius + 0.46, 0.3, 0.05),
-      shardTrim: flatArcGeometry(radius + 0.466, 0.012, 0.3),
-    }),
-    [radius],
-  );
-  const direction = seed % 2 === 0 ? 1 : -1;
-  useFrame(({ clock }) => {
-    const t = clock.getElapsedTime();
-    if (reducedMotion) return;
-    if (ring.current) {
-      ring.current.rotation.y = t * 0.11 * direction + seed;
-      ring.current.position.y = 0.04 + Math.sin(t * 0.7 + seed) * 0.03;
-    }
-    if (shards.current) {
-      shards.current.rotation.y = -t * 0.19 * direction + seed * 1.7;
-      shards.current.position.y = 0.42 + Math.sin(t * 0.9 + seed * 2) * 0.05;
-    }
-    runes.current.forEach((material, index) => {
-      if (material) material.emissiveIntensity = 2.4 + Math.sin(t * 2.2 + index * 1.05 + seed) * 1.3;
-    });
-  });
-  const segments = useMemo(() => Array.from({ length: SEGMENTS }, (_, index) => (index / SEGMENTS) * TAU), []);
-  return (
-    <group>
-      <group ref={ring} position={[0, 0.04, 0]}>
-        {segments.map((angle, index) => (
-          <group key={index} rotation={[0, angle, 0]}>
-            <mesh geometry={geometries.segment} {...SHADOW}>
-              <meshStandardMaterial color={PAL.bronze} metalness={0.9} roughness={0.38} envMapIntensity={1.1} />
-            </mesh>
-            <mesh geometry={geometries.outerTrim} position={[0, 0.102, 0]} castShadow>
-              <Brass roughness={0.22} />
-            </mesh>
-            <mesh geometry={geometries.innerTrim} position={[0, 0.102, 0]}>
-              <Brass roughness={0.22} />
-            </mesh>
-            <mesh geometry={geometries.channel} position={[0, 0.108, 0]}>
-              <meshStandardMaterial
-                ref={(material) => {
-                  if (material) runes.current[index] = material;
-                }}
-                color="#1a0f05"
-                emissive={PAL.glow}
-                emissiveIntensity={2.6}
-                toneMapped={false}
-              />
-            </mesh>
-            {[-0.3, 0, 0.3].map((offset) => (
-              <mesh
-                key={offset}
-                position={[Math.cos(offset * SEGMENT_ARC) * (radius - 0.13), 0.13, -Math.sin(offset * SEGMENT_ARC) * (radius - 0.13)]}
-                rotation={[0, offset * SEGMENT_ARC + Math.PI / 4, 0]}
-              >
-                <boxGeometry args={[0.05, 0.05, 0.05]} />
-                <meshStandardMaterial color="#1a0f05" emissive={PAL.glow} emissiveIntensity={3.2} toneMapped={false} />
-              </mesh>
-            ))}
-          </group>
-        ))}
-      </group>
-      <group ref={shards} position={[0, 0.42, 0]} rotation={[0.08, 0, -0.05]}>
-        {[0, 1, 2].map((index) => (
-          <group key={index} rotation={[0, (index / 3) * TAU + 0.5, 0]}>
-            <mesh geometry={geometries.shard} castShadow>
-              <meshStandardMaterial color={PAL.bronze} metalness={0.9} roughness={0.34} envMapIntensity={1.1} />
-            </mesh>
-            <mesh geometry={geometries.shardTrim} position={[0, 0.062, 0]}>
-              <Brass roughness={0.22} />
-            </mesh>
-            <mesh position={[radius + 0.38, 0.08, 0]}>
-              <boxGeometry args={[0.04, 0.04, 0.04]} />
-              <meshStandardMaterial color="#1a0f05" emissive={PAL.glow} emissiveIntensity={3} toneMapped={false} />
-            </mesh>
-          </group>
-        ))}
-      </group>
-    </group>
-  );
-}
-
-/* ------------------------------------------------------------------ */
 /* Week stack                                                          */
 
 function WeekStack({ progressRef, reducedMotion }: { progressRef: MutableRefObject<number>; reducedMotion: boolean }) {
@@ -1275,7 +1153,7 @@ function WeekStack({ progressRef, reducedMotion }: { progressRef: MutableRefObje
       {days.map((entry) => (
         <group key={entry.day}>
           <Platter tint={entry.day % 2 === 0 ? "#d9c3a8" : "#cdb59a"} top="dial" />
-          <MageRing radius={R + 0.5} seed={entry.day} reducedMotion={reducedMotion} />
+          <MageRing radius={R + 0.42} seed={entry.day} reducedMotion={reducedMotion} detail={3} />
           {entry.items.map((item, index) => (
             <group key={index} position={[item.x, STACK_ITEM_Y, item.z]} rotation={[0, item.yaw, 0]} scale={0.85}>
               <ItemView kind={item.kind} seed={entry.day + index} />
@@ -1316,8 +1194,18 @@ function Stars({ reducedMotion, visible }: { reducedMotion: boolean; visible: bo
   );
 }
 
+/** Dev aid: open the landing with ?ringlab=1 to preview the halo up close around the main clock. */
+function useRingLab(): boolean {
+  return useSyncExternalStore(
+    () => () => {},
+    () => new URLSearchParams(window.location.search).has("ringlab"),
+    () => false,
+  );
+}
+
 function World(props: PlanWorldProps) {
   const { reducedMotion, onReady } = props;
+  const ringLab = useRingLab();
   // Everything above has loaded (models, textures, lighting) once this mounts.
   useEffect(() => {
     onReady?.();
@@ -1328,6 +1216,7 @@ function World(props: PlanWorldProps) {
       <Platter top="glass" />
       <ClockFace />
       <ClockHands progressRef={props.progressRef} reducedMotion={reducedMotion} />
+      {ringLab && <MageRing radius={R + 0.42} seed={1} reducedMotion={reducedMotion} detail={3} />}
       <Items {...props} />
       <WeekStack progressRef={props.progressRef} reducedMotion={reducedMotion} />
     </group>
