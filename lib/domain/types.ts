@@ -158,6 +158,7 @@ export type ExtractedTask = {
     preferredDateWindows?: TemporalWindow[];
     avoidConsecutiveDays?: boolean;
     sessionCount?: number;
+    minimumDistinctDays?: number;
     maximumSessionMinutes?: number;
   };
   sequence?: {
@@ -388,6 +389,7 @@ export type ScheduleProposal = {
   availableMinutes: number;
   plannedMinutes: number;
   bufferMinutes: number;
+  warnings?: string[];
 };
 
 export type ReplanChange =

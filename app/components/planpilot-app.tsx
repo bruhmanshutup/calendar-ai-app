@@ -578,6 +578,12 @@ export function PlanHealthPanel({ compact = false }: { compact?: boolean }) {
           <span>scheduled</span>
         </div>
       </div>
+      {proposal.warnings?.map((warning) => (
+        <div className="state-warning" role="status" key={warning}>
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>{warning}</span>
+        </div>
+      ))}
       <div className="health-metrics">
         <div>
           <span className="metric-icon metric-icon-green">

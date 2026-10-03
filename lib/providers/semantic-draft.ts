@@ -153,6 +153,7 @@ export const semanticDraftSchema = z.object({
               .max(1440)
               .optional(),
             sessionCount: z.number().int().min(2).max(31).optional(),
+            minimumDistinctDays: z.number().int().min(2).max(31).optional(),
           })
           .optional(),
         confidence,
@@ -432,6 +433,7 @@ export const GEMINI_SEMANTIC_DRAFT_SCHEMA = {
                 maximum: 1440,
               },
               sessionCount: { type: "integer", minimum: 2, maximum: 31 },
+              minimumDistinctDays: { type: "integer", minimum: 2, maximum: 31 },
             },
           },
           confidence: { type: "number" },

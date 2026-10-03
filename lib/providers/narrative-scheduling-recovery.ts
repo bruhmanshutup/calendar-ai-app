@@ -220,7 +220,7 @@ function explicitSchedulingConstraints(
     ? parseClockTime(preferredRange[2])
     : undefined;
   const sessionCountMatch =
-    /(?:split|break)[^.\n]{0,50}\b(?:into|across)\s+(two|three|four|five|\d+)\s+sessions?/i.exec(
+    /(?:split|break)[^.\n]{0,50}\b(?:into|across)\s+(two|three|four|five|\d+)\s+(sessions?|days?)/i.exec(
       text,
     );
   const numberWords: Record<string, number> = {
@@ -232,6 +232,11 @@ function explicitSchedulingConstraints(
   const sessionCount = sessionCountMatch
     ? (numberWords[sessionCountMatch[1].toLocaleLowerCase()] ??
       Number(sessionCountMatch[1]))
+    : undefined;
+  const distinctDayMatch =
+    /(?:across|over|for)\s+(two|three|four|five|\d+)\s+days?/i.exec(text);
+  const minimumDistinctDays = distinctDayMatch
+    ? (numberWords[distinctDayMatch[1].toLocaleLowerCase()] ?? Number(distinctDayMatch[1]))
     : undefined;
   const existing = task.schedulingConstraints;
   const next: NonNullable<ExtractedTask["schedulingConstraints"]> = {
@@ -251,6 +256,7 @@ function explicitSchedulingConstraints(
         text,
       ) || existing?.avoidConsecutiveDays,
     sessionCount: sessionCount || existing?.sessionCount,
+    minimumDistinctDays: minimumDistinctDays || existing?.minimumDistinctDays,
   };
   return Object.values(next).some((value) => value !== undefined)
     ? next

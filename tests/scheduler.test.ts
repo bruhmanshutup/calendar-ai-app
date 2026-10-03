@@ -336,6 +336,61 @@ describe("deterministic scheduling", () => {
     }
   });
 
+  it("reserves fixed events before flexible work", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "fixed",
+          title: "Fixed meeting",
+          taskType: "fixed_time",
+          fixedStartAt: "2026-07-27T10:00:00.000Z",
+          fixedEndAt: "2026-07-27T11:00:00.000Z",
+          estimatedMinutes: 60,
+          splittable: false,
+        }),
+        task({
+          id: "flexible",
+          title: "Flexible work",
+          estimatedMinutes: 60,
+          splittable: false,
+        }),
+      ]),
+    );
+    const fixed = proposal.sessions.find((session) => session.taskId === "fixed")!;
+    const flexible = proposal.sessions.find((session) => session.taskId === "flexible")!;
+    expect(
+      new Date(flexible.end).getTime() <= new Date(fixed.start).getTime() ||
+        new Date(flexible.start).getTime() >= new Date(fixed.end).getTime(),
+    ).toBe(true);
+  });
+
+  it("keeps overlapping fixed events and reports a warning", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "fixed-one",
+          title: "Meeting one",
+          taskType: "fixed_time",
+          fixedStartAt: "2026-07-27T10:00:00.000Z",
+          fixedEndAt: "2026-07-27T11:00:00.000Z",
+          estimatedMinutes: 60,
+          splittable: false,
+        }),
+        task({
+          id: "fixed-two",
+          title: "Meeting two",
+          taskType: "fixed_time",
+          fixedStartAt: "2026-07-27T10:30:00.000Z",
+          fixedEndAt: "2026-07-27T11:30:00.000Z",
+          estimatedMinutes: 60,
+          splittable: false,
+        }),
+      ]),
+    );
+    expect(proposal.sessions.filter((session) => session.taskId.startsWith("fixed-")).length).toBe(2);
+    expect(proposal.warnings).toContain("Fixed events overlap: “Meeting one” and “Meeting two”.");
+  });
+
   it("splits long work without tiny leftover blocks", () => {
     const proposal = generateSchedule(
       scheduling([
@@ -352,6 +407,53 @@ describe("deterministic scheduling", () => {
     expect(sessions.length).toBeGreaterThan(1);
     expect(sessions.every((session) => session.minutes >= 30)).toBe(true);
     expect(sessions.reduce((sum, session) => sum + session.minutes, 0)).toBe(140);
+  });
+
+  it("keeps a requested multi-day split on distinct local dates", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "five-days",
+          title: "Five day project",
+          estimatedMinutes: 150,
+          splittable: true,
+          minimumSessionMinutes: 30,
+          dueDate: "2026-07-31",
+          schedulingConstraints: {
+            sessionCount: 5,
+            minimumDistinctDays: 5,
+          },
+        }),
+      ]),
+    );
+    const sessions = proposal.sessions.filter((session) => session.taskId === "five-days");
+    expect(sessions).toHaveLength(5);
+    expect(new Set(sessions.map((session) => session.start.slice(0, 10))).size).toBe(5);
+  });
+
+  it("allows extra sessions after satisfying the distinct-day minimum", () => {
+    const proposal = generateSchedule(
+      scheduling([
+        task({
+          id: "two-days-three-sessions",
+          title: "Two day project",
+          estimatedMinutes: 90,
+          splittable: true,
+          minimumSessionMinutes: 30,
+          schedulingConstraints: {
+            sessionCount: 3,
+            minimumDistinctDays: 2,
+          },
+        }),
+      ]),
+    );
+    const sessions = proposal.sessions.filter((session) => session.taskId === "two-days-three-sessions");
+    const counts = [...new Set(sessions.map((session) => session.start.slice(0, 10)))].map(
+      (date) => sessions.filter((session) => session.start.startsWith(date)).length,
+    );
+    expect(sessions).toHaveLength(3);
+    expect(counts.length).toBeGreaterThanOrEqual(2);
+    expect(counts.every((count) => count >= 1)).toBe(true);
   });
 
   it("adds breaks after demanding focus sessions", () => {

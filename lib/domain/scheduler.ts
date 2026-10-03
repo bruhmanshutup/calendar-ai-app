@@ -225,6 +225,14 @@ function isFree(
   return low >= busy.length || busy[low].start >= candidate.end;
 }
 
+function overlaps(left: NumericInterval, right: NumericInterval): boolean {
+  return left.start < right.end && right.start < left.end;
+}
+
+function isFixedTask(task: ExtractedTask | undefined): boolean {
+  return task?.taskType === "fixed_time" || task?.recurrence?.mode === "fixed_times";
+}
+
 function insertBusyInterval(
   busy: NumericInterval[],
   interval: NumericInterval,
@@ -1634,6 +1642,7 @@ function findCandidate(
 ): Candidate | undefined {
   const mode = PLANNING_MODE_CONFIG[input.preferences.planningMode];
   const taskSessions = sessions.filter((session) => session.taskId === task.id);
+  const minimumDistinctDays = task.schedulingConstraints?.minimumDistinctDays ?? 0;
   const existingTaskStart = taskSessions.length
     ? Math.min(
         ...taskSessions.map((session) => new Date(session.start).getTime()),
@@ -1781,6 +1790,15 @@ function findCandidate(
           taskSessions,
           input.preferences.timeZone,
         )
+      ) {
+        continue;
+      }
+      // When the task explicitly requires multiple days, reserve one session
+      // on a new local date until the minimum distinct-day count is reached.
+      // Once that count is met, additional sessions may share a date.
+      if (
+        minimumDistinctDays > taskSessionDates.size &&
+        taskSessionDates.has(local.date)
       ) {
         continue;
       }
@@ -2089,6 +2107,11 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
         start: session.start,
         end: session.end,
       })),
+      ...input.tasks.flatMap((task) =>
+        task.taskType === "fixed_time" && task.fixedStartAt && task.fixedEndAt
+          ? [{ start: task.fixedStartAt, end: task.fixedEndAt }]
+          : [],
+      ),
     ].map(toNumeric),
   );
   const busy = [...baseBusy];
@@ -2126,6 +2149,26 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
   }));
   const tasksById = new Map(
     normalizedInputTasks.map((task) => [task.id, task]),
+  );
+  // Existing calendar blocks and flexible locked work remain hard conflicts.
+  // Fixed events are allowed to overlap one another and are surfaced as a
+  // warning, so keep their locked intervals out of this conflict set.
+  const nonFixedBusy = mergeIntervals(
+    [
+      ...input.unavailableEvents,
+      ...input.blockedTimes,
+      ...input.lockedSessions
+        .filter((session) => !isFixedTask(tasksById.get(session.taskId)))
+        .map((session) => ({ start: session.start, end: session.end })),
+    ].map(toNumeric),
+  );
+  const explicitFixedReservations = normalizedInputTasks.flatMap((task) =>
+    task.taskType === "fixed_time" && task.fixedStartAt && task.fixedEndAt
+      ? [{
+          start: new Date(task.fixedStartAt).getTime(),
+          end: new Date(task.fixedEndAt).getTime(),
+        }]
+      : [],
   );
   const totalRequestedMinutes = normalizedInputTasks.reduce(
     (total, task) =>
@@ -2300,7 +2343,16 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
           tasksById,
           input,
         ) ||
-        !isFree(slot, busy)
+        (!isFree(slot, nonFixedBusy) ||
+          (!isFree(slot, busy) &&
+            !explicitFixedReservations.some((reservation) => overlaps(slot, reservation)) &&
+            !sessions.some((session) =>
+              isFixedTask(tasksById.get(session.taskId)) &&
+              overlaps(slot, {
+                start: new Date(session.start).getTime(),
+                end: new Date(session.end).getTime(),
+              }),
+            )))
       ) {
         unschedulableTasks.push(
           unschedulable(task, minutes || estimate, "FIXED_TIME_CONFLICT"),
@@ -2368,7 +2420,16 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
             tasksById,
             input,
           ) ||
-          !isFree(slot, busy)
+          (!isFree(slot, nonFixedBusy) ||
+            (!isFree(slot, busy) &&
+              !explicitFixedReservations.some((reservation) => overlaps(slot, reservation)) &&
+              !sessions.some((session) =>
+                isFixedTask(tasksById.get(session.taskId)) &&
+                overlaps(slot, {
+                  start: new Date(session.start).getTime(),
+                  end: new Date(session.end).getTime(),
+                }),
+              )))
         ) {
           conflictedMinutes += minutes;
           continue;
@@ -2675,12 +2736,32 @@ export function generateSchedule(input: SchedulingInput): ScheduleProposal {
       ? 100
       : Math.round((plannedMinutes / requiredMinutes) * 100);
   const riskiest = unschedulableTasks[0];
+  const fixedSessions = sessions.filter((session) =>
+    isFixedTask(tasksById.get(session.taskId)),
+  );
+  const overlapWarnings: string[] = [];
+  for (let index = 0; index < fixedSessions.length; index += 1) {
+    for (let other = index + 1; other < fixedSessions.length; other += 1) {
+      const left = fixedSessions[index];
+      const right = fixedSessions[other];
+      if (
+        overlaps(
+          { start: new Date(left.start).getTime(), end: new Date(left.end).getTime() },
+          { start: new Date(right.start).getTime(), end: new Date(right.end).getTime() },
+        )
+      ) {
+        const warning = `Fixed events overlap: “${left.title}” and “${right.title}”.`;
+        if (!overlapWarnings.includes(warning)) overlapWarnings.push(warning);
+      }
+    }
+  }
 
   return {
     id: "proposal-deterministic-v1",
     sessions,
     breaks,
     unschedulable: unschedulableTasks,
+    ...(overlapWarnings.length ? { warnings: overlapWarnings } : {}),
     planHealth: {
       scheduledPercent,
       deadlinesAtRisk,

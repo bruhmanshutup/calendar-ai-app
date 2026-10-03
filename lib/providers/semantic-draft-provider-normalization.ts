@@ -125,6 +125,13 @@ function normalizeValue(value: unknown, path: PathSegment[]): unknown {
   }
   if (
     normalizedPath(path) === "responsibilities.*.planning" &&
+    typeof normalized.minimumDistinctDays === "number" &&
+    normalized.minimumDistinctDays < 2
+  ) {
+    delete normalized.minimumDistinctDays;
+  }
+  if (
+    normalizedPath(path) === "responsibilities.*.planning" &&
     typeof normalized.estimatedMinutes === "number" &&
     normalized.estimatedMinutes <= 0
   ) {

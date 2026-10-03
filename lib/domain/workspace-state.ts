@@ -74,6 +74,7 @@ const scheduleProposalSchema = z.object({
       suggestedActions: z.array(z.string()),
     }),
   ),
+  warnings: z.array(z.string()).optional(),
   planHealth: z.object({
     scheduledPercent: z.number(),
     deadlinesAtRisk: z.number().int().min(0),

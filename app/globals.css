@@ -694,6 +694,9 @@ input[type="date"], input[type="time"], input[type="datetime-local"] { color-sch
 .state-success > svg { color: var(--accent-3); }
 .state-warning { border-color: color-mix(in srgb, var(--amber) 45%, transparent); background: var(--amber-soft); }
 .state-warning > svg { color: var(--amber-ink); }
+.plan-health .state-warning { align-items: center; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); border-radius: var(--radius-sm); display: flex; gap: 8px; margin-top: 14px; padding: 10px 12px; }
+.plan-health .state-warning > svg { flex: none; }
+.plan-health .state-warning span { color: var(--muted); font-size: var(--text-sm); }
 .fallback-notice { align-items: flex-start; }
 .fallback-notice .fallback-action { color: var(--ink); font-weight: 650; }
 .import-success-stack { display: grid; gap: 10px; }

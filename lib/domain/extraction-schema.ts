@@ -172,6 +172,7 @@ export const extractedTaskSchema = z
           .optional(),
         avoidConsecutiveDays: z.boolean().optional(),
         sessionCount: z.number().int().min(2).max(31).optional(),
+        minimumDistinctDays: z.number().int().min(2).max(31).optional(),
         maximumSessionMinutes: z
           .number()
           .int()

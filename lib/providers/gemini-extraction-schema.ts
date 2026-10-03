@@ -175,6 +175,7 @@ export const GEMINI_EXTRACTION_SCHEMA = {
               },
               avoidConsecutiveDays: { type: "boolean" },
               sessionCount: { type: "integer", minimum: 2, maximum: 31 },
+              minimumDistinctDays: { type: "integer", minimum: 2, maximum: 31 },
               maximumSessionMinutes: {
                 type: "integer",
                 minimum: 1,

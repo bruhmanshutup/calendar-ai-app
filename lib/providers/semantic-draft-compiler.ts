@@ -385,6 +385,9 @@ function constraintWindows(
     ...(responsibility.planning?.sessionCount
       ? { sessionCount: responsibility.planning.sessionCount }
       : {}),
+    ...(responsibility.planning?.minimumDistinctDays
+      ? { minimumDistinctDays: responsibility.planning.minimumDistinctDays }
+      : {}),
     ...(responsibility.planning?.maximumSessionMinutes
       ? {
           maximumSessionMinutes: Math.min(
@@ -429,7 +432,8 @@ function compileResponsibility(
       responsibility.planning?.energyDemand ?? inferredEnergy(category),
     splittable:
       responsibility.planning?.splittable ??
-      (responsibility.kind === "task" && estimate >= 90),
+      ((responsibility.planning?.minimumDistinctDays ?? 0) > 1 ||
+        (responsibility.kind === "task" && estimate >= 90)),
     estimatedMinutes: isMilestone ? undefined : estimate,
     effortEstimateSource: isMilestone
       ? undefined
