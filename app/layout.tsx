@@ -3,6 +3,8 @@ import { headers } from "next/headers";
 import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import { PlanPilotProvider } from "./components/planpilot-provider";
 import "./globals.css";
+// Polish pass (copy only). Delete this line and polish.css to undo.
+import "./polish.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

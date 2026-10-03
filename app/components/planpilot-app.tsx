@@ -171,6 +171,17 @@ const REASON_LABELS: Record<ScheduleReasonCode, string> = {
   USER_PLACEMENT: "Your placement",
 };
 
+/** Calm per-task colors, like the calendar colors in Notion Calendar and Structured. */
+const TASK_COLORS = ["#a79fcc", "#8fb59a", "#8fb3d4", "#d4a0a8", "#d6b98a", "#7fbfb8", "#e0a98a", "#c49fd0"];
+
+function taskColor(tasks: ExtractedTask[], taskId: string): string {
+  const index = tasks.findIndex((task) => (task.id ?? task.title) === taskId);
+  if (index >= 0) return TASK_COLORS[index % TASK_COLORS.length];
+  let hash = 0;
+  for (const character of taskId) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return TASK_COLORS[hash % TASK_COLORS.length];
+}
+
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat("en-US", {
     timeZone: DEFAULT_PREFERENCES.timeZone,
@@ -1225,7 +1236,6 @@ function DashboardView() {
     return sum + Math.max(0, Math.round((new Date(session.end).getTime() - now) / 60_000));
   }, 0);
   const renderTodaySession = (session: PlannedSession) => {
-    const index = orderedToday.indexOf(session);
     const past = isPast(session);
     const current = isNow(session);
     const note = specificExplanation(session.explanation);
@@ -1235,7 +1245,7 @@ function DashboardView() {
           <strong>{formatTime(session.start)}</strong>
           <span>{formatTime(session.end)}</span>
         </div>
-        <i className={index % 3 === 0 ? "blue" : index % 3 === 1 ? "green" : "amber"} aria-hidden="true" />
+        <i className="today-dot" style={{ background: taskColor(tasks, session.taskId) }} aria-hidden="true" />
         <div className="today-detail">
           <div>
             <strong>{session.title}</strong>
@@ -2708,6 +2718,7 @@ export function ScheduleSessionCard({
   return (
     <article
       className={`schedule-session ${session.status === "approved" ? "session-approved" : ""} ${session.status === "proposed" ? "session-proposed" : ""} ${isOverdue ? "session-overdue" : ""} ${expanded ? "is-expanded" : ""}`}
+      style={{ "--event-color": taskColor(tasks, session.taskId) } as React.CSSProperties}
       data-manually-draggable={canMove ? "true" : "false"}
       onPointerDown={canMove ? onSessionPointerDown : undefined}
       onPointerMove={canMove ? onSessionPointerMove : undefined}
@@ -3425,6 +3436,9 @@ function ScheduleView() {
       )}
       <div className="schedule-toolbar">
         <div className="week-nav" role="group" aria-label="Choose week">
+          <button type="button" className="week-nav-today" onClick={() => setWeekOffset(0)} disabled={weekOffset === 0}>
+            Today
+          </button>
           <button type="button" className="icon-button" onClick={() => setWeekOffset((value) => value - 1)} aria-label="Previous week" title="Previous week">
             <ChevronLeft size={18} aria-hidden="true" />
           </button>
@@ -3432,11 +3446,6 @@ function ScheduleView() {
             <ChevronRight size={18} aria-hidden="true" />
           </button>
           <h2 className="week-nav-range" aria-live="polite">{weekRangeLabel(weekColumns)}</h2>
-          {weekOffset !== 0 && (
-            <button type="button" className="week-nav-today" onClick={() => setWeekOffset(0)}>
-              This week
-            </button>
-          )}
         </div>
         <div className="view-toggle" role="group" aria-label="Schedule layout">
           <button aria-pressed={mode === "week"} className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}><CalendarDays size={15} aria-hidden="true" /> Timeline</button>

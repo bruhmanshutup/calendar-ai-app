@@ -1,0 +1,220 @@
+/* =========================================================================
+   PlanPilot — polish pass (copy only, 2026-10-02)
+
+   Inspiration (screenshots/notes, not copied code):
+   - Notion Calendar: soft tinted event blocks with a colored stripe per
+     calendar, an always-visible "Today" button, a big month/week title.
+   - Amie: quiet surfaces, thin dividers, small gray labels, lots of space.
+   - Structured (Apple Design Award): one color per task, durations shown
+     plainly, a calm timeline.
+   - MotionSites "ADHD Planner" prompt: calm tone, soft rounded controls.
+
+   Everything here only applies inside the signed-in app (pages that have
+   .app-shell); the landing page is untouched. To undo: delete this file and
+   its import line in app/layout.tsx.
+   ========================================================================= */
+
+/* ---------- Calmer, flatter colors ---------- */
+html.dark:has(.app-shell) {
+  --page: #111116;
+  --page-2: #15151b;
+  --surface: #18181f;
+  --surface-solid: #1b1b22;
+  --surface-raised: #1f1f27;
+  --surface-soft: rgba(255, 255, 255, 0.03);
+  --surface-hover: rgba(255, 255, 255, 0.055);
+  --line: rgba(255, 255, 255, 0.075);
+  --line-strong: rgba(255, 255, 255, 0.13);
+  --ink: #ededf2;
+  --muted: #a3a3b0;
+  --faint: #7c7c88;
+  --glass-highlight: transparent;
+  --accent-solid: #8a83c4;
+  --accent-solid-hover: #9790cf;
+  --grad-primary: linear-gradient(180deg, #8f88c9, #8179bd);
+  --grad-text: linear-gradient(90deg, #7c7c88, #7c7c88);
+  --glow-accent: 0 0 0 transparent;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.38);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.5);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 16px;
+}
+html:not(.dark):has(.app-shell) {
+  --page: #f6f6f8;
+  --page-2: #efeff3;
+  --surface: #ffffff;
+  --surface-solid: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-soft: rgba(20, 20, 30, 0.025);
+  --surface-hover: rgba(20, 20, 30, 0.045);
+  --line: rgba(20, 20, 30, 0.08);
+  --line-strong: rgba(20, 20, 30, 0.14);
+  --glass-highlight: transparent;
+  --accent-solid: #6c63a8;
+  --accent-solid-hover: #5e5699;
+  --grad-primary: linear-gradient(180deg, #7068ad, #655d9f);
+  --grad-text: linear-gradient(90deg, #6f6c82, #6f6c82);
+  --glow-accent: 0 0 0 transparent;
+  --shadow-xs: 0 1px 2px rgba(20, 20, 30, 0.05);
+  --shadow-sm: 0 1px 3px rgba(20, 20, 30, 0.06);
+  --shadow-md: 0 10px 28px rgba(20, 20, 30, 0.1);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 16px;
+}
+/* No aurora glow, grain, or background rings behind app screens. */
+html:has(.app-shell) body::before,
+html:has(.app-shell) body::after { display: none; }
+.app-shell .app-backdrop { display: none; }
+
+/* ---------- Cards: solid, evenly bordered, no glass ---------- */
+.app-shell .panel,
+.app-shell .plan-health,
+.app-shell .risk-panel,
+.app-shell .completion-card,
+.app-shell .tip-card,
+.app-shell .state-card,
+.app-shell .review-summary,
+.app-shell .task-review-card,
+.app-shell .sequence-plan-panel,
+.app-shell .export-panel,
+.app-shell .daily-card,
+.app-shell .calm-note,
+.app-shell .change-diff,
+.app-shell .empty-state {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+}
+.app-shell .panel,
+.app-shell .plan-health,
+.app-shell .completion-card,
+.app-shell .tip-card,
+.app-shell .export-panel,
+.app-shell .task-review-card,
+.app-shell .empty-state { border: 1px solid var(--line); }
+.app-shell .panel-heading h2 { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+.app-shell .panel-heading p { font-size: 12.5px; }
+
+/* ---------- Top bar: quieter, the current tab is a soft chip ---------- */
+.app-shell .app-dock {
+  background: color-mix(in srgb, var(--page) 86%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+  padding: 6px 8px 6px 12px;
+}
+.app-shell .dock-links a { border-radius: 9px; font-weight: 550; min-height: 36px; }
+.app-shell .dock-links a.active {
+  background: var(--surface-hover);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--ink);
+}
+.app-shell .dock-links a i { background: var(--accent-solid); }
+.app-shell .dock-links a.active i { background: var(--accent-solid); color: #fff; }
+.app-shell .dock-more-button { border-radius: 9px; height: 36px; width: 36px; }
+.app-shell .brand-mark { background: var(--accent-solid); border-radius: 10px; box-shadow: none; height: 32px; width: 32px; }
+
+/* ---------- Headings: smaller, tighter, plain labels ---------- */
+.app-shell .page-heading { margin-bottom: 22px; }
+.app-shell .page-heading h1 { font-size: clamp(24px, 2.2vw, 30px); font-weight: 650; letter-spacing: -0.025em; margin: 6px 0 4px; }
+.app-shell .page-heading p { font-size: 14px; }
+.app-shell .eyebrow { font-size: 11px; font-weight: 650; letter-spacing: 0.08em; }
+.app-shell .eyebrow .waypoint-dots { display: none; }
+
+/* ---------- Buttons: solid and flat, no glow or shine ---------- */
+.app-shell .button { border-radius: 10px; font-weight: 600; }
+.app-shell .button-md { min-height: 40px; padding: 8px 16px; }
+.app-shell .button-primary,
+.app-shell .topbar-add {
+  background: var(--accent-solid);
+  box-shadow: none;
+  color: #ffffff;
+}
+.app-shell .button-primary::after { display: none; }
+.app-shell .button-primary:hover:not(:disabled),
+.app-shell .topbar-add:hover { background: var(--accent-solid-hover); box-shadow: none; transform: none; }
+.app-shell .button-secondary {
+  backdrop-filter: none;
+  background: var(--surface-raised);
+  border-color: var(--line-strong);
+}
+.app-shell .button-secondary:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--line-strong); }
+.app-shell .badge { border-radius: 6px; font-weight: 600; }
+.app-shell .view-toggle { background: var(--surface-soft); border-radius: 10px; }
+.app-shell .view-toggle button { border-radius: 8px; }
+.app-shell .view-toggle button.active { background: var(--surface-raised); box-shadow: var(--shadow-xs), inset 0 0 0 1px var(--line-strong); color: var(--ink); }
+
+/* ---------- Plan health ---------- */
+.app-shell .metric-icon { background: var(--surface-soft); box-shadow: none; color: var(--muted); }
+.app-shell .plan-health-compact .plan-health-heading { min-height: 0; padding: 14px 20px; }
+.app-shell .plan-health-compact .health-ring { height: 56px; width: 56px; }
+.app-shell .plan-health-compact .health-ring span { display: none; }
+.app-shell .plan-health-compact .health-ring strong { font-size: 13px; }
+
+/* ---------- Overview "Today" list: a colored dot per task ---------- */
+.app-shell .today-item { grid-template-columns: 82px 10px 1fr 40px; min-height: 64px; }
+.app-shell .today-item > i.today-dot { align-self: center; border-radius: 50%; box-shadow: none; height: 10px; width: 10px; }
+
+/* =========================================================================
+   Schedule — Notion-Calendar-style blocks in each task's color
+   ========================================================================= */
+.app-shell .schedule-toolbar { background: transparent; border: 0; padding: 0 0 12px; }
+.app-shell .time-grid { border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-xs); }
+.app-shell .time-grid-head { border-radius: var(--radius-md) var(--radius-md) 0 0; }
+.app-shell .week-nav { gap: 6px; }
+.app-shell .week-nav-range { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; margin-left: 6px; }
+.app-shell .week-nav-today {
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 34px;
+  padding: 0 14px;
+}
+.app-shell .week-nav-today:hover:not(:disabled) { background: var(--surface-hover); }
+.app-shell .week-nav-today:disabled { color: var(--faint); cursor: default; }
+.app-shell .time-grid-day.today strong { background: var(--accent-solid); box-shadow: none; }
+
+/* Each block is tinted in its task's color with a solid stripe on the left. */
+.app-shell .schedule-session::before { background: var(--event-color, var(--accent)); box-shadow: none; width: 3px; }
+.app-shell .schedule-session:nth-child(2n)::before { background: var(--event-color, var(--accent-3)); box-shadow: none; }
+.app-shell .grid-session > .schedule-session {
+  background: color-mix(in srgb, var(--event-color, var(--accent)) 20%, var(--surface-solid));
+  border: 1px solid color-mix(in srgb, var(--event-color, var(--accent)) 30%, transparent);
+  border-radius: 6px;
+  box-shadow: none;
+}
+.app-shell .grid-session > .schedule-session.session-proposed {
+  background: color-mix(in srgb, var(--event-color, var(--accent)) 10%, var(--surface-solid));
+  border-style: dashed;
+}
+.app-shell .grid-session .session-when { color: color-mix(in srgb, var(--event-color, var(--accent)) 55%, var(--ink)); }
+html:not(.dark) .app-shell .grid-session .session-when { color: color-mix(in srgb, var(--event-color, var(--accent)) 55%, #1c1a26); }
+.app-shell .grid-session.is-expanded > .schedule-session { background: color-mix(in srgb, var(--event-color, var(--accent)) 14%, var(--surface-raised)); }
+
+/* ---------- Remove leftover corner glows; tidy the side cards ---------- */
+.app-shell .plan-health::before,
+.app-shell .risk-panel::before { display: none; }
+.app-shell .plan-health-heading { min-height: 0; padding: 22px 24px; }
+.app-shell .plan-health-heading h2 { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; margin: 6px 0 2px; }
+.app-shell .health-ring { height: 84px; width: 84px; }
+.app-shell .health-metrics > div { padding: 14px 20px; }
+.app-shell .risk-panel { padding: 20px; }
+.app-shell .risk-panel h2 { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+.app-shell .risk-icon { border-radius: 10px; height: 36px; margin-bottom: 12px; width: 36px; }
+.app-shell .completion-card { border-color: var(--line); }
+.app-shell .health-ring span { display: none; }
+.app-shell .health-ring strong { font-size: 18px; }
+/* Stronger task tint so colors read at a glance (proposed stays a bit lighter, with a dashed edge). */
+.app-shell .grid-session > .schedule-session { background: color-mix(in srgb, var(--event-color, var(--accent)) 30%, var(--surface-solid)); border-color: color-mix(in srgb, var(--event-color, var(--accent)) 45%, transparent); }
+.app-shell .grid-session > .schedule-session.session-proposed { background: color-mix(in srgb, var(--event-color, var(--accent)) 20%, var(--surface-solid)); }
+.app-shell .schedule-session::before, .app-shell .schedule-session:nth-child(2n)::before { width: 4px; }
