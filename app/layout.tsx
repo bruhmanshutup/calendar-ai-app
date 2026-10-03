@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
+import { Geist, Geist_Mono, Instrument_Serif, Inter_Tight, Space_Grotesk } from "next/font/google";
 import { PlanPilotProvider } from "./components/planpilot-provider";
 import "./globals.css";
 // Polish pass (copy only). Delete this line and polish.css to undo.
 import "./polish.css";
+// MotionSites pass (copy only). Delete this line and motionsites.css to undo.
+import "./motionsites.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,6 +25,22 @@ const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+// MotionSites-style type (copy only): Inter Tight headlines + one italic serif accent word.
+const interTight = Inter_Tight({
+  variable: "--font-inter-tight",
+  subsets: ["latin"],
+  weight: ["500", "600"],
+  display: "swap",
+});
+
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-instrument-serif",
+  subsets: ["latin"],
+  weight: "400",
+  style: "italic",
   display: "swap",
 });
 
@@ -80,7 +98,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${interTight.variable} ${instrumentSerif.variable} antialiased`}
       >
         <PlanPilotProvider>{children}</PlanPilotProvider>
       </body>

@@ -1,0 +1,288 @@
+/* =========================================================================
+   MotionSites pass (copy only, 2026-10-02)
+   Styles taken from MotionSites sample designs and their prompts:
+   - "Forecast Center": frosted liquid-glass cards over an atmospheric sky,
+     glass pill chips, a glowing white marker on the current page, a smooth
+     wave chart with day labels, a one-time sheen sweep and draw-in motion.
+   - "F1 Racing Hub": big tight stat numbers with one accent color.
+   - "ADHD Planner": dark/white pill buttons with the icon in a circle, a
+     dot-and-line divider, one italic serif word in the headline.
+   No photos, logos, or text from those samples are used.
+   To undo just this pass: delete this file and its import in app/layout.tsx.
+   ========================================================================= */
+
+/* ---------- Atmospheric sky behind the app ---------- */
+html.dark:has(.app-shell) {
+  --page: #0e1420;
+  --stat-accent: #e9cf8f;
+  --glass-card: linear-gradient(180deg, rgba(255,255,255,0.085) 0%, rgba(255,255,255,0.068) 24%, rgba(255,255,255,0.058) 78%, rgba(255,255,255,0.052) 100%);
+  --glass-line: rgba(255, 255, 255, 0.13);
+  --glass-chip: rgba(255, 255, 255, 0.12);
+  --glass-solid: rgba(17, 22, 34, 0.9);
+  --wave-ink: #ffffff;
+}
+html:not(.dark):has(.app-shell) {
+  --page: #eef1f7;
+  --stat-accent: #a6772a;
+  --glass-card: linear-gradient(180deg, rgba(255,255,255,0.78) 0%, rgba(255,255,255,0.66) 100%);
+  --glass-line: rgba(255, 255, 255, 0.85);
+  --glass-chip: rgba(255, 255, 255, 0.7);
+  --glass-solid: rgba(246, 247, 251, 0.94);
+  --wave-ink: #5b5480;
+}
+html.dark:has(.app-shell) body {
+  background:
+    radial-gradient(90% 60% at 12% -8%, rgba(167, 159, 204, 0.32), transparent 62%),
+    radial-gradient(80% 55% at 85% -5%, rgba(143, 179, 212, 0.26), transparent 60%),
+    radial-gradient(70% 45% at 50% 108%, rgba(127, 191, 184, 0.12), transparent 70%),
+    linear-gradient(180deg, #0c1320 0%, #101726 45%, #14131d 100%);
+  background-attachment: fixed;
+}
+html:not(.dark):has(.app-shell) body {
+  background:
+    radial-gradient(90% 60% at 12% -8%, rgba(167, 159, 204, 0.35), transparent 62%),
+    radial-gradient(80% 55% at 85% -5%, rgba(143, 179, 212, 0.4), transparent 60%),
+    linear-gradient(180deg, #e3eaf5 0%, #edeaf5 50%, #f6f3f0 100%);
+  background-attachment: fixed;
+}
+/* Slow drifting cloud light + a soft side vignette (from the Forecast Center stage). */
+html:has(.app-shell) body::before {
+  animation: ms-clouds 70s ease-in-out infinite alternate;
+  background:
+    radial-gradient(38% 22% at 28% 16%, rgba(255, 255, 255, 0.07), transparent 70%),
+    radial-gradient(32% 18% at 72% 26%, rgba(255, 255, 255, 0.05), transparent 70%),
+    radial-gradient(45% 20% at 50% 70%, rgba(255, 255, 255, 0.035), transparent 70%);
+  display: block;
+  filter: blur(28px);
+  opacity: 1;
+}
+html.dark:has(.app-shell) body::after {
+  background: linear-gradient(105deg, rgba(4, 10, 18, 0.32) 0%, rgba(4, 10, 18, 0.12) 45%, transparent 80%);
+  display: block;
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+@keyframes ms-clouds { from { transform: translate3d(-2%, 0, 0); } to { transform: translate3d(3%, 1.5%, 0); } }
+
+/* ---------- Liquid-glass cards ---------- */
+.app-shell .panel,
+.app-shell .plan-health,
+.app-shell .risk-panel,
+.app-shell .completion-card,
+.app-shell .tip-card,
+.app-shell .state-card,
+.app-shell .review-summary,
+.app-shell .task-review-card,
+.app-shell .sequence-plan-panel,
+.app-shell .export-panel,
+.app-shell .daily-card,
+.app-shell .calm-note,
+.app-shell .change-diff,
+.app-shell .empty-state,
+.app-shell .wave-card {
+  backdrop-filter: blur(22px) saturate(118%);
+  -webkit-backdrop-filter: blur(22px) saturate(118%);
+  background: var(--glass-card);
+  border: 1px solid var(--glass-line);
+  border-radius: 20px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.22);
+}
+html:not(.dark) .app-shell .panel,
+html:not(.dark) .app-shell .plan-health,
+html:not(.dark) .app-shell .wave-card,
+html:not(.dark) .app-shell .risk-panel,
+html:not(.dark) .app-shell .export-panel { box-shadow: inset 0 1px 0 #fff, 0 12px 30px rgba(60, 60, 100, 0.1); }
+
+/* One-time sheen sweep across the main cards (Forecast Center "specular coda"). */
+.app-shell .wave-card::after,
+.app-shell .plan-health::before,
+.app-shell .risk-panel::before {
+  animation: ms-sheen 1.15s cubic-bezier(0.22, 0.61, 0.36, 1) 0.9s 1 both;
+  background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, 0.16) 50%, transparent 100%);
+  bottom: 0;
+  content: "";
+  display: block;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 38%;
+}
+.app-shell .risk-panel::before { animation-delay: 1.05s; }
+.app-shell .plan-health::before { animation-delay: 1.2s; }
+@keyframes ms-sheen {
+  from { transform: translate3d(-150%, 0, 0) skewX(-18deg); }
+  to { transform: translate3d(320%, 0, 0) skewX(-18deg); }
+}
+
+/* ---------- Top bar: glass, with a glowing marker under the current tab ---------- */
+.app-shell .app-dock {
+  background: color-mix(in srgb, var(--page) 55%, transparent);
+  backdrop-filter: blur(22px) saturate(120%);
+  border: 1px solid var(--glass-line);
+  border-radius: 18px;
+}
+.app-shell .dock-links a.active { background: var(--glass-chip); box-shadow: none; }
+.app-shell .dock-links a.active::after {
+  animation: ms-grow 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  background: var(--wave-ink);
+  border-radius: 3px;
+  bottom: -5px;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--wave-ink) 60%, transparent);
+  content: "";
+  height: 3px;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 18px;
+}
+@keyframes ms-grow { from { transform: translateX(-50%) scaleX(0); } }
+
+/* ---------- Glass pill chips (page label, hero chips, card labels) ---------- */
+.app-shell .page-heading .eyebrow,
+.app-shell .glass-chip,
+.app-shell .hero-chip {
+  align-items: center;
+  backdrop-filter: blur(16px) saturate(115%);
+  background: var(--glass-chip);
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  border: 1px solid var(--glass-line);
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 550;
+  gap: 7px;
+  letter-spacing: 0.02em;
+  min-height: 30px;
+  padding: 0 13px;
+}
+.app-shell .page-heading .eyebrow { font-size: 11px; letter-spacing: 0.08em; }
+.hero-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.app-shell .hero-chip svg { color: var(--muted); }
+.app-shell .hero-chip-next svg { color: var(--chip-color); }
+.app-shell .hero-chip { animation: ms-rise 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both; }
+.app-shell .hero-chip:nth-child(2) { animation-delay: 0.28s; }
+.app-shell .hero-chip:nth-child(3) { animation-delay: 0.36s; }
+
+/* Dot-and-line divider (ADHD Planner). */
+.dot-divider { align-items: center; display: flex; gap: 6px; margin-top: 22px; max-width: 560px; }
+.dot-divider i { background: color-mix(in srgb, var(--ink) 35%, transparent); border-radius: 50%; flex: none; height: 7px; width: 7px; }
+.dot-divider span { animation: ms-wipe 1s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both; background: color-mix(in srgb, var(--ink) 22%, transparent); flex: 1; height: 1.5px; transform-origin: left; }
+@keyframes ms-wipe { from { transform: scaleX(0); } }
+
+/* ---------- Headline: Inter Tight + one italic serif word ---------- */
+.app-shell .page-heading h1 {
+  animation: ms-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+  font-family: var(--font-inter-tight), var(--font-geist-sans), system-ui, sans-serif;
+  font-size: clamp(30px, 3vw, 44px);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin: 14px 0 6px;
+}
+.app-shell .page-heading h1 em {
+  animation: ms-focus 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.45s both;
+  color: color-mix(in srgb, var(--ink) 70%, transparent);
+  font-family: var(--font-instrument-serif), "Times New Roman", serif;
+  font-size: 1.1em;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  padding-right: 0.04em;
+}
+@keyframes ms-focus { from { filter: blur(4px); opacity: 0.35; } }
+
+/* ---------- Pill buttons with the icon in a circle (ADHD Planner) ---------- */
+.app-shell .button-primary,
+.app-shell .topbar-add { border-radius: 999px; }
+html.dark .app-shell .button-primary,
+html.dark .app-shell .topbar-add { background: #ffffff; color: #15141c; }
+html.dark .app-shell .button-primary:hover:not(:disabled),
+html.dark .app-shell .topbar-add:hover { background: #ecebf3; }
+html:not(.dark) .app-shell .button-primary,
+html:not(.dark) .app-shell .topbar-add { background: #1d1b26; color: #ffffff; }
+html:not(.dark) .app-shell .button-primary:hover:not(:disabled),
+html:not(.dark) .app-shell .topbar-add:hover { background: #2c2938; }
+.app-shell .button-primary:has(> svg:first-child) { gap: 10px; padding-left: 5px; }
+.app-shell .button-primary > svg:first-child,
+.app-shell .topbar-add > svg:first-child {
+  background: var(--accent-solid);
+  border-radius: 50%;
+  box-sizing: content-box;
+  color: #ffffff;
+  height: 14px;
+  padding: 6px;
+  width: 14px;
+}
+html:not(.dark) .app-shell .button-primary > svg:first-child,
+html:not(.dark) .app-shell .topbar-add > svg:first-child { background: #ffffff; color: #1d1b26; }
+.app-shell .topbar-add { gap: 8px; padding-left: 5px; }
+
+/* ---------- "This week" wave card ---------- */
+.app-shell .wave-card { animation: ms-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both; overflow: hidden; padding: 18px 22px 14px; position: relative; }
+.wave-card-head { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 16px 28px; justify-content: space-between; }
+.wave-stats { display: flex; flex-wrap: wrap; gap: 8px 30px; margin: 0; }
+.wave-stats div { display: grid; gap: 2px; }
+.wave-stats dt { color: var(--faint); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.wave-stats dd { color: var(--ink); font-family: var(--font-inter-tight), var(--font-geist-sans), sans-serif; font-size: 32px; font-variant-numeric: tabular-nums; font-weight: 500; letter-spacing: -0.035em; line-height: 1.05; margin: 0; }
+.wave-stats dd.is-accent { color: var(--stat-accent); }
+.wave-chart { color: var(--wave-ink); height: 140px; margin-top: 10px; position: relative; }
+.wave-chart svg { display: block; height: 100%; overflow: visible; width: 100%; }
+.wave-line, .wave-glow { animation: ms-draw 1.6s cubic-bezier(0.37, 0.01, 0.2, 1) 0.35s forwards; stroke-dasharray: 1; stroke-dashoffset: 1; }
+.wave-area { animation: ms-fade 1s ease 1.3s forwards; opacity: 0; }
+.wave-dot { animation: ms-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 1.5s forwards; background: currentColor; border-radius: 50%; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent); height: 8px; opacity: 0; position: absolute; transform: translate(-50%, -50%); width: 8px; }
+.wave-dot.is-today { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 16%, transparent), 0 0 18px color-mix(in srgb, currentColor 60%, transparent); height: 12px; width: 12px; }
+.wave-days { display: grid; grid-template-columns: repeat(7, 1fr); list-style: none; margin: 4px 0 0; padding: 0; text-align: center; }
+.wave-days li { display: grid; gap: 1px; }
+.wave-days span { color: var(--muted); font-size: 14px; font-weight: 500; }
+.wave-days small { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.wave-days li.is-today span { color: var(--ink); font-weight: 650; }
+@keyframes ms-draw { to { stroke-dashoffset: 0; } }
+@keyframes ms-fade { to { opacity: 1; } }
+@keyframes ms-pop { from { opacity: 0; transform: translate(-50%, -50%) scale(0.4); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+@keyframes ms-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Overview "Today": a timeline with a round icon per task ---------- */
+.app-shell .today-item { grid-template-columns: 82px 32px 1fr 40px; position: relative; }
+.app-shell .today-item::before { background: var(--glass-line); bottom: 0; content: ""; left: 131px; position: absolute; top: 0; width: 1.5px; }
+.today-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--task-color) 26%, var(--glass-solid));
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--task-color) 45%, transparent);
+  color: var(--task-color);
+  display: flex;
+  height: 32px;
+  justify-content: center;
+  position: relative;
+  width: 32px;
+  z-index: 1;
+}
+html:not(.dark) .today-icon { color: color-mix(in srgb, var(--task-color) 70%, #1c1a26); }
+.app-shell .session-icon { color: var(--event-color, var(--accent)); margin-right: 4px; vertical-align: -1px; }
+
+/* ---------- Calendar: glass frame, frosted sticky headers ---------- */
+.app-shell .time-grid {
+  backdrop-filter: blur(22px) saturate(118%);
+  background: color-mix(in srgb, var(--page) 40%, transparent);
+  border: 1px solid var(--glass-line);
+  border-radius: 20px;
+}
+.app-shell .time-grid-head,
+.app-shell .time-gutter,
+.app-shell .time-grid-corner { backdrop-filter: blur(16px); background: var(--glass-solid); }
+.app-shell .time-grid-day.today strong { background: var(--wave-ink); color: var(--page); }
+.app-shell .grid-now-line { box-shadow: 0 0 10px color-mix(in srgb, var(--red) 70%, transparent); }
+.app-shell .week-nav-today { background: var(--glass-chip); border-color: var(--glass-line); border-radius: 999px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .wave-line, .app-shell .wave-glow { animation: none; stroke-dashoffset: 0; }
+  .app-shell .wave-area, .app-shell .wave-dot { animation: none; opacity: 1; }
+  html:has(.app-shell) body::before,
+  .app-shell .wave-card::after, .app-shell .plan-health::before, .app-shell .risk-panel::before { animation: none; display: none; }
+}
+
+/* Keep the small task icon on the same line as the name. */
+.app-shell .session-icon { display: inline-block; }

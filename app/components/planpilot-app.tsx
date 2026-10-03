@@ -105,6 +105,8 @@ import {
   usePlanPilot,
 } from "./planpilot-provider";
 import { LandingExperience } from "./landing";
+import { TaskIcon } from "./task-visuals";
+import { WeekWave } from "./week-wave";
 import {
   AppBackdrop,
   PlanOrbit,
@@ -1140,7 +1142,7 @@ function PageHeading({
   actions,
 }: {
   eyebrow?: string;
-  title: string;
+  title: ReactNode;
   detail?: string;
   actions?: ReactNode;
 }) {
@@ -1231,6 +1233,30 @@ function DashboardView() {
     now < new Date(session.end).getTime();
   const upcomingToday = orderedToday.filter((session) => !isPast(session));
   const pastToday = orderedToday.filter(isPast);
+  const hourNow = now === undefined ? undefined : Number(localTimeKey(new Date(now)).slice(0, 2));
+  const partOfDay =
+    hourNow === undefined ? undefined : hourNow < 12 ? "morning" : hourNow < 17 ? "afternoon" : "evening";
+  const greeting: ReactNode = partOfDay ? (
+    <>
+      Good <em>{partOfDay}</em>.
+    </>
+  ) : (
+    "Your plan at a glance."
+  );
+  // This week's load per day, for the wave chart.
+  const waveDays = weekColumnsFor(0).map((day) => ({
+    label: day.label,
+    isToday: day.date === todayKey,
+    minutes: proposal.sessions
+      .filter((session) => localDateKey(new Date(session.start)) === day.date)
+      .reduce((sum, session) => sum + session.minutes, 0),
+  }));
+  const weekStart = weekColumnsFor(0)[0].date;
+  const weekEnd = weekColumnsFor(0)[6].date;
+  const weekSessionCount = proposal.sessions.filter((session) => {
+    const key = localDateKey(new Date(session.start));
+    return key >= weekStart && key <= weekEnd;
+  }).length;
   const minutesLeft = upcomingToday.reduce((sum, session) => {
     if (!isNow(session) || now === undefined) return sum + session.minutes;
     return sum + Math.max(0, Math.round((new Date(session.end).getTime() - now) / 60_000));
@@ -1245,7 +1271,9 @@ function DashboardView() {
           <strong>{formatTime(session.start)}</strong>
           <span>{formatTime(session.end)}</span>
         </div>
-        <i className="today-dot" style={{ background: taskColor(tasks, session.taskId) }} aria-hidden="true" />
+        <span className="today-icon" style={{ "--task-color": taskColor(tasks, session.taskId) } as React.CSSProperties} aria-hidden="true">
+          <TaskIcon title={session.title} size={15} />
+        </span>
         <div className="today-detail">
           <div>
             <strong>{session.title}</strong>
@@ -1256,7 +1284,7 @@ function DashboardView() {
               </Badge>
             )}
           </div>
-          {note && <p>{note}</p>}
+          <p>{note || `${session.minutes} min`}</p>
         </div>
         <Link href="/schedule" aria-label={`Open ${session.title} on the schedule`}>
           <ChevronRight size={18} aria-hidden="true" />
@@ -1289,15 +1317,34 @@ function DashboardView() {
   return (
     <>
       <div className="dash-hero">
-        <PageHeading
-          eyebrow={formatToday(true).toUpperCase()}
-          title="Your plan at a glance."
-          actions={
-            <Link href="/import" className="button button-primary button-md">
-              <Plus size={16} aria-hidden="true" /> Add responsibilities
-            </Link>
-          }
-        />
+        <div className="dash-hero-copy">
+          <PageHeading
+            eyebrow={formatToday(true).toUpperCase()}
+            title={greeting}
+            actions={
+              <Link href="/import" className="button button-primary button-md">
+                <Plus size={16} aria-hidden="true" /> Add responsibilities
+              </Link>
+            }
+          />
+          <div className="hero-chips">
+            <span className="hero-chip">
+              <CalendarDays size={14} aria-hidden="true" />
+              {todaySessions.length} {todaySessions.length === 1 ? "session" : "sessions"} today
+            </span>
+            <span className="hero-chip">
+              <Clock3 size={14} aria-hidden="true" />
+              {minutesLeft > 0 ? `${minutesLeft} min left` : "Nothing left today"}
+            </span>
+            {upcomingToday[0] && (
+              <span className="hero-chip hero-chip-next" style={{ "--chip-color": taskColor(tasks, upcomingToday[0].taskId) } as React.CSSProperties}>
+                <TaskIcon title={upcomingToday[0].title} size={14} />
+                Next: {upcomingToday[0].title} · {formatTime(upcomingToday[0].start)}
+              </span>
+            )}
+          </div>
+          <div className="dot-divider" aria-hidden="true"><i /><span /><i /></div>
+        </div>
         <PlanOrbit
           compact
           progress={dayProgress}
@@ -1312,6 +1359,7 @@ function DashboardView() {
       </div>
       <div className="dashboard-grid">
         <div className="dashboard-main">
+          <WeekWave days={waveDays} sessionCount={weekSessionCount} todayCount={todaySessions.length} />
           <PlanHealthPanel />
           <section className="panel">
             <div className="panel-heading">
@@ -2743,7 +2791,7 @@ export function ScheduleSessionCard({
         <div className="session-main">
           <span className="session-when" title={`${formatTime(session.start)}–${formatTime(session.end)}`}>{compactTimeRange(session.start, session.end)}</span>
           {/* Non-breaking hyphens keep course codes like "220-2" on one line. */}
-          <h3>{session.title.replace(/(\w)-(\w)/g, "$1‑$2")}</h3>
+          <h3><TaskIcon title={session.title} size={11} className="session-icon" />{session.title.replace(/(\w)-(\w)/g, "$1‑$2")}</h3>
         </div>
         {session.status === "proposed" ? (
           <button
