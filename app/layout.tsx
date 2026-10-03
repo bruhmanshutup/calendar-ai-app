@@ -7,6 +7,8 @@ import "./globals.css";
 import "./polish.css";
 // MotionSites pass (copy only). Delete this line and motionsites.css to undo.
 import "./motionsites.css";
+// Animated landscape behind the app (copy only). Delete this line and sky.css to undo.
+import "./sky.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

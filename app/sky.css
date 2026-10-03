@@ -1,0 +1,187 @@
+/* =========================================================================
+   Animated landscape behind the app (copy only, 2026-10-02).
+   Component: app/components/app-sky.tsx. To undo: delete this file, the
+   component, and their two references (app/layout.tsx, planpilot-app.tsx).
+   The sky follows the time of day (data-part) and the light/dark theme.
+   ========================================================================= */
+
+/* ---------- Palettes ---------- */
+.app-sky {
+  /* Dark theme, evening and daytime: indigo sky over a warm rose horizon. */
+  --sky-top: #0b1126;
+  --sky-mid: #26234d;
+  --sky-horizon: #8c5d75;
+  --sky-glow: rgba(242, 172, 142, 0.42);
+  --ridge-far: #2c2a4f;
+  --ridge-mid: #1d1b38;
+  --ridge-near: #110f22;
+  --star-opacity: 0.55;
+  --orb: #f8dcbd;
+  --orb-glow: rgba(248, 196, 150, 0.45);
+  --orb-top: 30%;
+  --cloud: rgba(255, 220, 210, 0.07);
+  --aurora-opacity: 0.18;
+}
+.app-sky[data-part="night"] {
+  --sky-top: #050913;
+  --sky-mid: #0d1631;
+  --sky-horizon: #24305a;
+  --sky-glow: rgba(120, 150, 230, 0.28);
+  --ridge-far: #1a2244;
+  --ridge-mid: #111833;
+  --ridge-near: #090d1c;
+  --star-opacity: 1;
+  --orb: #f3f0e6;
+  --orb-glow: rgba(235, 235, 255, 0.3);
+  --orb-top: 12%;
+  --cloud: rgba(255, 255, 255, 0.035);
+  --aurora-opacity: 0.5;
+}
+.app-sky[data-part="dawn"] {
+  --sky-mid: #3a2c55;
+  --sky-horizon: #c07f74;
+  --sky-glow: rgba(255, 186, 140, 0.5);
+}
+html:not(.dark) .app-sky {
+  /* Light theme: soft daytime sky with a sun and clouds. */
+  --sky-top: #9fbde3;
+  --sky-mid: #c9d9ef;
+  --sky-horizon: #f4e6ea;
+  --sky-glow: rgba(255, 255, 255, 0.75);
+  --ridge-far: #b8bfe0;
+  --ridge-mid: #a2a9d4;
+  --ridge-near: #8b93c4;
+  --star-opacity: 0;
+  --orb: #fff7de;
+  --orb-glow: rgba(255, 238, 186, 0.85);
+  --orb-top: 11%;
+  --cloud: rgba(255, 255, 255, 0.75);
+  --aurora-opacity: 0;
+}
+html:not(.dark) .app-sky[data-part="dawn"],
+html:not(.dark) .app-sky[data-part="dusk"],
+html:not(.dark) .app-sky[data-part="night"] {
+  --sky-top: #b9b6e3;
+  --sky-mid: #e5d3e6;
+  --sky-horizon: #f8d8c4;
+  --sky-glow: rgba(255, 205, 165, 0.6);
+  --ridge-far: #c9bedf;
+  --ridge-mid: #b3a7d0;
+  --ridge-near: #9b8ec0;
+  --orb: #ffe3c6;
+  --orb-glow: rgba(255, 200, 160, 0.7);
+  --orb-top: 30%;
+}
+
+/* The scene replaces the earlier faint glow layers. */
+html:has(.app-shell) body::before { display: none; }
+html.dark:has(.app-shell) body { background: #0b1126; }
+html:not(.dark):has(.app-shell) body { background: #c9d9ef; }
+
+/* ---------- Scene ---------- */
+.app-sky {
+  background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 48%, var(--sky-horizon) 78%, var(--sky-horizon) 100%);
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: fixed;
+  transition: background 2s ease;
+  z-index: -1;
+}
+.sky-glow {
+  animation: sky-breathe 14s ease-in-out infinite alternate;
+  background: radial-gradient(60% 34% at 50% 74%, var(--sky-glow), transparent 70%);
+  inset: 0;
+  position: absolute;
+}
+.sky-aurora { inset: 0; opacity: var(--aurora-opacity); position: absolute; }
+.sky-aurora span {
+  animation: sky-aurora 38s ease-in-out infinite alternate;
+  background: linear-gradient(90deg, transparent, rgba(143, 220, 200, 0.9), rgba(167, 159, 230, 0.9), transparent);
+  border-radius: 50%;
+  filter: blur(46px);
+  height: 18vh;
+  left: -10%;
+  position: absolute;
+  top: 12%;
+  transform: rotate(-8deg);
+  width: 120%;
+}
+.sky-aurora span + span { animation-duration: 52s; animation-direction: alternate-reverse; opacity: 0.7; top: 24%; transform: rotate(5deg); }
+.sky-stars { inset: 0 0 35% 0; opacity: var(--star-opacity); position: absolute; transition: opacity 2s ease; }
+.sky-stars i {
+  animation: sky-twinkle ease-in-out infinite;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
+  position: absolute;
+}
+.shooting-star {
+  animation: sky-shoot 11s ease-in 4s infinite;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.9), transparent);
+  border-radius: 2px;
+  height: 1.5px;
+  left: 70%;
+  opacity: 0;
+  position: absolute;
+  top: 8%;
+  transform: rotate(-24deg);
+  width: 120px;
+}
+.sky-orb {
+  animation: sky-float 16s ease-in-out infinite alternate;
+  background: radial-gradient(circle at 38% 36%, #ffffff 0%, var(--orb) 55%, color-mix(in srgb, var(--orb) 80%, #000) 100%);
+  border-radius: 50%;
+  box-shadow: 0 0 40px 10px var(--orb-glow), 0 0 120px 40px color-mix(in srgb, var(--orb-glow) 50%, transparent);
+  height: 78px;
+  left: 44%;
+  position: absolute;
+  top: var(--orb-top);
+  transition: top 2s ease;
+  width: 78px;
+}
+.sky-clouds span {
+  animation: sky-drift 140s linear infinite;
+  background: var(--cloud);
+  border-radius: 999px;
+  box-shadow: 60px -18px 0 8px var(--cloud), 130px 4px 0 -4px var(--cloud), -50px 10px 0 -6px var(--cloud);
+  filter: blur(14px);
+  height: 46px;
+  left: -20%;
+  position: absolute;
+  top: 18%;
+  width: 180px;
+}
+.sky-clouds span:nth-child(2) { animation-delay: -60s; animation-duration: 180s; top: 32%; transform: scale(1.4); }
+.sky-clouds span:nth-child(3) { animation-delay: -110s; animation-duration: 160s; top: 9%; transform: scale(0.8); }
+.sky-ridges { bottom: 0; height: 46vh; left: 0; min-height: 280px; position: absolute; width: 100%; }
+.sky-ridges path { transition: fill 2s ease; }
+.sky-mist {
+  background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--ridge-near) 70%, transparent) 100%);
+  bottom: 0;
+  height: 22vh;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+@keyframes sky-breathe { from { opacity: 0.75; } to { opacity: 1; } }
+@keyframes sky-aurora { from { transform: translate3d(-6%, 0, 0) rotate(-8deg) scaleY(0.9); } to { transform: translate3d(6%, 3vh, 0) rotate(-3deg) scaleY(1.15); } }
+@keyframes sky-twinkle { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@keyframes sky-shoot {
+  0%, 90% { opacity: 0; transform: translate3d(0, 0, 0) rotate(-24deg); }
+  92% { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(-340px, 150px, 0) rotate(-24deg); }
+}
+@keyframes sky-float { from { transform: translateY(0); } to { transform: translateY(-10px); } }
+@keyframes sky-drift { from { left: -20%; } to { left: 115%; } }
+
+/* Readability: glass cards a touch more opaque over the busier scene. */
+html.dark .app-shell { --glass-card: linear-gradient(180deg, rgba(22, 24, 44, 0.5) 0%, rgba(18, 20, 38, 0.44) 100%); }
+html:not(.dark) .app-shell { --glass-card: linear-gradient(180deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.7) 100%); }
+html.dark .app-shell .time-grid { background: rgba(14, 16, 32, 0.55); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sky-glow, .sky-aurora span, .sky-stars i, .shooting-star, .sky-orb, .sky-clouds span { animation: none; }
+  .shooting-star { display: none; }
+}

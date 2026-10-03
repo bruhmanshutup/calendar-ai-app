@@ -107,8 +107,8 @@ import {
 import { LandingExperience } from "./landing";
 import { TaskIcon } from "./task-visuals";
 import { WeekWave } from "./week-wave";
+import { AppSky } from "./app-sky";
 import {
-  AppBackdrop,
   PlanOrbit,
   RouteIllustration,
   SkeletonPanel,
@@ -799,7 +799,7 @@ function AppShell({
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      <AppBackdrop />
+      <AppSky />
       <nav className="app-dock" aria-label="Main navigation">
         <Brand compact />
         <div className="dock-links">
